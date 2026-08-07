@@ -73,6 +73,7 @@ jobs:
         run: docker build --pull -f spikes/foundation/Dockerfile -t ollama-remote-control:foundation-spike .
 
       - name: Upload generated lockfile for commit
+        if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: foundation-package-lock
