@@ -1,0 +1,81 @@
+name: foundation-spike
+
+on:
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  compatibility:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+
+      - name: Set up Node 24
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: '24'
+          check-latest: true
+
+      - name: Install disposable SSH server
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends openssh-server
+          sudo ssh-keygen -A
+
+          sudo useradd -m -s /bin/bash orcspike
+          sudo passwd -d orcspike
+
+          ssh-keygen -q -t ed25519 -N '' -f "$RUNNER_TEMP/orc_spike_key"
+          sudo install -d -m 700 -o orcspike -g orcspike /home/orcspike/.ssh
+          sudo install -m 600 -o orcspike -g orcspike "$RUNNER_TEMP/orc_spike_key.pub" /home/orcspike/.ssh/authorized_keys
+
+          sudo mkdir -p /run/sshd
+          cat > "$RUNNER_TEMP/sshd_config" <<'EOF'
+          Port 2222
+          ListenAddress 127.0.0.1
+          HostKey /etc/ssh/ssh_host_ed25519_key
+          PubkeyAuthentication yes
+          PasswordAuthentication no
+          KbdInteractiveAuthentication no
+          PermitRootLogin no
+          UsePAM no
+          AllowUsers orcspike
+          AllowTcpForwarding yes
+          PermitTTY yes
+          AuthorizedKeysFile .ssh/authorized_keys
+          Subsystem sftp internal-sftp
+          PidFile /tmp/orc-spike-sshd.pid
+          EOF
+
+          sudo /usr/sbin/sshd -f "$RUNNER_TEMP/sshd_config" -E "$RUNNER_TEMP/orc-spike-sshd.log"
+
+      - name: Install exact spike dependencies and generate lockfile
+        run: npm install --ignore-scripts=false
+
+      - name: Run compatibility gates
+        env:
+          SSH_HOST: 127.0.0.1
+          SSH_PORT: '2222'
+          SSH_USER: orcspike
+          SSH_PRIVATE_KEY_PATH: ${{ runner.temp }}/orc_spike_key
+        run: npm run spike:foundation
+
+      - name: Build deployment-base Docker image
+        run: docker build --pull -f spikes/foundation/Dockerfile -t ollama-remote-control:foundation-spike .
+
+      - name: Upload generated lockfile for commit
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: foundation-package-lock
+          path: package-lock.json
+          if-no-files-found: error
+          retention-days: 1
