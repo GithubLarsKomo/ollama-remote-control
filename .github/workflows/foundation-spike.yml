@@ -6,7 +6,7 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
   compatibility:
@@ -80,3 +80,22 @@ jobs:
           path: package-lock.json
           if-no-files-found: error
           retention-days: 1
+
+      - name: Commit bootstrap lockfile on the owned foundation branch
+        if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && github.head_ref == 'agent/wave-0-foundation'
+        shell: bash
+        run: |
+          set -euo pipefail
+          if git ls-remote --exit-code origin "refs/heads/$GITHUB_HEAD_REF" >/dev/null 2>&1; then
+            git fetch origin "$GITHUB_HEAD_REF"
+            git checkout -B "$GITHUB_HEAD_REF" "origin/$GITHUB_HEAD_REF"
+          fi
+          if git ls-files --error-unmatch package-lock.json >/dev/null 2>&1; then
+            echo 'package-lock.json is already tracked; no bootstrap commit needed.'
+            exit 0
+          fi
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add package-lock.json
+          git commit -m 'lock foundation dependencies'
+          git push origin "HEAD:$GITHUB_HEAD_REF"
