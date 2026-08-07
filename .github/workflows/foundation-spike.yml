@@ -6,7 +6,7 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
   compatibility:
@@ -22,6 +22,7 @@ jobs:
         with:
           node-version: '24'
           check-latest: true
+          cache: npm
 
       - name: Install disposable SSH server
         shell: bash
@@ -58,8 +59,8 @@ jobs:
 
           sudo /usr/sbin/sshd -f "$RUNNER_TEMP/sshd_config" -E "$RUNNER_TEMP/orc-spike-sshd.log"
 
-      - name: Install exact spike dependencies and generate lockfile
-        run: npm install --ignore-scripts=false
+      - name: Install locked spike dependencies
+        run: npm ci --ignore-scripts=false
 
       - name: Run compatibility gates
         env:
@@ -71,31 +72,3 @@ jobs:
 
       - name: Build deployment-base Docker image
         run: docker build --pull -f spikes/foundation/Dockerfile -t ollama-remote-control:foundation-spike .
-
-      - name: Upload generated lockfile for commit
-        if: always()
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
-        with:
-          name: foundation-package-lock
-          path: package-lock.json
-          if-no-files-found: error
-          retention-days: 1
-
-      - name: Commit bootstrap lockfile on the owned foundation branch
-        if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && github.head_ref == 'agent/wave-0-foundation'
-        shell: bash
-        run: |
-          set -euo pipefail
-          if git ls-remote --exit-code origin "refs/heads/$GITHUB_HEAD_REF" >/dev/null 2>&1; then
-            git fetch origin "$GITHUB_HEAD_REF"
-            git checkout -B "$GITHUB_HEAD_REF" "origin/$GITHUB_HEAD_REF"
-          fi
-          if git ls-files --error-unmatch package-lock.json >/dev/null 2>&1; then
-            echo 'package-lock.json is already tracked; no bootstrap commit needed.'
-            exit 0
-          fi
-          git config user.name 'github-actions[bot]'
-          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git add package-lock.json
-          git commit -m 'lock foundation dependencies'
-          git push origin "HEAD:$GITHUB_HEAD_REF"
