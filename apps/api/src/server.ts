@@ -64,6 +64,10 @@ import {
   TargetDiscoveryService,
 } from './targets.js';
 import {
+  UpdatePlanError,
+  UpdatePlanService,
+} from './update-plan.js';
+import {
   UpdatePreflightError,
   UpdatePreflightService,
 } from './update-preflight.js';
@@ -87,6 +91,7 @@ interface TargetSelectionBody { readonly containerId?: unknown; readonly display
 interface ContainerLifecycleBody { readonly confirmation?: ContainerLifecycleConfirmation; }
 interface HostParams { readonly hostId: string; }
 interface TargetParams { readonly targetId: string; }
+interface UpdatePlanQuery { readonly snapshotId?: unknown; }
 interface LogQuery { readonly tail?: unknown; }
 interface LoginBucket { failures: number; resetAt: number; }
 
@@ -134,6 +139,7 @@ function sendApiError(reply: FastifyReply, error: unknown): FastifyReply {
     || error instanceof ContainerLifecycleError
     || error instanceof JobServiceError
     || error instanceof UpdatePreflightError
+    || error instanceof UpdatePlanError
   ) {
     return reply.code(error.statusCode).send({ error: { code: error.code, message: error.message } });
   }
@@ -184,6 +190,14 @@ export function buildServer(options: BuildServerOptions = {}): FastifyInstance {
     masterKey,
     auditService,
     now,
+  );
+  const updatePlan = new UpdatePlanService(
+    hostRepository,
+    credentialRepository,
+    targetRepository,
+    snapshotRepository,
+    masterKey,
+    auditService,
   );
   const loginLimiter = new LoginLimiter();
   const app = Fastify({ logger: false });
@@ -296,6 +310,16 @@ export function buildServer(options: BuildServerOptions = {}): FastifyInstance {
     try {
       const session = requireAuthenticatedMutation(request);
       return reply.code(201).send({ snapshot: await updatePreflight.capture(request.params.targetId, session.userId) });
+    } catch (error) { return sendApiError(reply, error); }
+  });
+
+  app.get<{ Params: TargetParams; Querystring: UpdatePlanQuery }>('/api/v1/targets/:targetId/container/update-plan', async (request, reply) => {
+    try {
+      const session = requireAuthenticated(request);
+      if (typeof request.query?.snapshotId !== 'string' || !request.query.snapshotId.trim()) {
+        throw new UpdatePlanError('INVALID_UPDATE_SNAPSHOT', 400, 'snapshotId query parameter is required.');
+      }
+      return reply.send({ plan: await updatePlan.create(request.params.targetId, request.query.snapshotId.trim(), session.userId) });
     } catch (error) { return sendApiError(reply, error); }
   });
 
