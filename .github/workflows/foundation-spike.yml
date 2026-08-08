@@ -184,7 +184,10 @@ jobs:
                 override="$(cat)"
                 printf '%s' "$override" > /tmp/orc-compose-stdin
                 expected_image='ollama/ollama@sha256:candidate-digest'
-                expected_json='{"services":{"ollama":{"image":"ollama/ollama@sha256:candidate-digest"}}}'
+                if [[ "$registry_mode" == "intent-changed" ]]; then
+                  expected_image='ollama/ollama@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'
+                fi
+                expected_json="{\"services\":{\"ollama\":{\"image\":\"${expected_image}\"}}}"
                 if [[ "$override" != "$expected_json" ]]; then
                   printf 'unexpected compose stdin override\n' >&2
                   exit 64
@@ -194,7 +197,7 @@ jobs:
                   exit 1
                 fi
                 if [[ "$compose_mode" == "pin-mismatch" ]]; then
-                  printf 'ollama/ollama@sha256:different-digest\n'
+                  printf 'ollama/ollama@sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\n'
                 else
                   printf '%s\n' "$expected_image"
                 fi
@@ -232,6 +235,7 @@ jobs:
                 else
                   candidate_digest='sha256:candidate-digest'
                   [[ "$registry_mode" == "same" ]] && candidate_digest='sha256:current-digest'
+                  [[ "$registry_mode" == "intent-changed" ]] && candidate_digest='sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'
                   printf '{"schemaVersion":2,"mediaType":"application/vnd.oci.image.index.v1+json","digest":"sha256:index-digest","manifests":[{"digest":"%s","platform":{"os":"linux","architecture":"amd64"}},{"digest":"sha256:arm64-digest","platform":{"os":"linux","architecture":"arm64"}}]}\n' "$candidate_digest"
                 fi
                 exit 0
@@ -239,6 +243,7 @@ jobs:
               if [[ "$format" == '{{json .Image}}' ]]; then
                 expected='ollama/ollama@sha256:candidate-digest'
                 [[ "$registry_mode" == "same" ]] && expected='ollama/ollama@sha256:current-digest'
+                [[ "$registry_mode" == "intent-changed" ]] && expected='ollama/ollama@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'
                 if [[ "$reference" != "$expected" ]]; then
                   printf 'unexpected image reference\n' >&2
                   exit 64
