@@ -22,6 +22,8 @@ const HAS_FIXTURE = Boolean(
 );
 const MASTER_KEY = Buffer.alloc(32, 0x76);
 const PASSWORD = 'update-execution-intent-admin-password!';
+const CANDIDATE_DIGEST = `sha256:${'a'.repeat(64)}`;
+const CANDIDATE_IMAGE = `ollama/ollama@${CANDIDATE_DIGEST}`;
 
 function cookiesFrom(response) {
   const header = response.headers['set-cookie'];
@@ -55,7 +57,7 @@ function resetFixture() {
   if (!HAS_FIXTURE) return;
   fs.writeFileSync(CONTAINER_STATE, 'running');
   fs.writeFileSync(LIFECYCLE_MODE, 'normal');
-  fs.writeFileSync(REGISTRY_MODE, 'changed');
+  fs.writeFileSync(REGISTRY_MODE, 'intent-changed');
   fs.writeFileSync(COMPOSE_MODE, 'normal');
   fs.writeFileSync(DOCKER_FIXTURE_LOG, '');
   fs.writeFileSync(COMPOSE_STDIN, '');
@@ -176,8 +178,8 @@ test('execution intent recomputes candidate, validates digest override over Open
     assert.equal(intent.snapshotId, snapshotId);
     assert.equal(intent.imageReference, 'ollama/ollama:latest');
     assert.equal(intent.currentDigest, 'sha256:current-digest');
-    assert.equal(intent.candidateDigest, 'sha256:candidate-digest');
-    assert.equal(intent.exactCandidateReference, 'ollama/ollama@sha256:candidate-digest');
+    assert.equal(intent.candidateDigest, CANDIDATE_DIGEST);
+    assert.equal(intent.exactCandidateReference, CANDIDATE_IMAGE);
     assert.equal(intent.strategy, 'compose');
     assert.equal(intent.composeService, 'ollama');
     assert.equal(response.body.includes('top-secret'), false);
@@ -185,14 +187,14 @@ test('execution intent recomputes candidate, validates digest override over Open
 
     assert.equal(
       fs.readFileSync(COMPOSE_STDIN, 'utf8'),
-      '{"services":{"ollama":{"image":"ollama/ollama@sha256:candidate-digest"}}}',
+      JSON.stringify({ services: { ollama: { image: CANDIDATE_IMAGE } } }),
     );
 
     const calls = dockerCalls();
     assert.deepEqual(calls, [
       'buildx version',
       'buildx imagetools inspect ollama/ollama:latest --format {{json .Manifest}}',
-      'buildx imagetools inspect ollama/ollama@sha256:candidate-digest --format {{json .Image}}',
+      `buildx imagetools inspect ${CANDIDATE_IMAGE} --format {{json .Image}}`,
       'compose version --short',
       'compose -p orc-stack --project-directory /srv/orc -f /srv/orc/compose.yml config --services',
       'compose -p orc-stack --project-directory /srv/orc -f /srv/orc/compose.yml ps --all -q ollama',
@@ -245,7 +247,7 @@ test('no-update and Compose pin failures produce failed intent jobs without muta
     assert.equal(response.json().error.code, 'NO_UPDATE_AVAILABLE');
     assert.equal(dockerCalls().some((call) => call.includes('-f - config --images')), false);
 
-    fs.writeFileSync(REGISTRY_MODE, 'changed');
+    fs.writeFileSync(REGISTRY_MODE, 'intent-changed');
     fs.writeFileSync(COMPOSE_MODE, 'pin-mismatch');
     fs.writeFileSync(DOCKER_FIXTURE_LOG, '');
     response = await app.inject({
