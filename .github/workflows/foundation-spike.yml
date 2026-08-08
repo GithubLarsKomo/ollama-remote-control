@@ -6,7 +6,7 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
   compatibility:
@@ -56,8 +56,8 @@ jobs:
           EOF
           sudo /usr/sbin/sshd -f "$RUNNER_TEMP/sshd_config" -E "$RUNNER_TEMP/orc-spike-sshd.log"
 
-      - name: Install locked dependencies
-        run: npm ci --ignore-scripts=false
+      - name: Refresh dependency lockfile
+        run: npm install --ignore-scripts=false
 
       - name: Build product
         run: npm run build
@@ -75,3 +75,22 @@ jobs:
 
       - name: Build deployment-base Docker image
         run: docker build --pull -f spikes/foundation/Dockerfile -t ollama-remote-control:foundation-spike .
+
+      - name: Commit refreshed lockfile on owned Wave 1 secret-store branch
+        if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && github.head_ref == 'agent/wave-1-secret-store'
+        shell: bash
+        run: |
+          set -euo pipefail
+          cp package-lock.json /tmp/orc-package-lock.json
+          git fetch origin "$GITHUB_HEAD_REF"
+          git checkout -B "$GITHUB_HEAD_REF" "origin/$GITHUB_HEAD_REF"
+          cp /tmp/orc-package-lock.json package-lock.json
+          if git diff --quiet -- package-lock.json; then
+            echo 'package-lock.json already current.'
+            exit 0
+          fi
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add package-lock.json
+          git commit -m 'lock Wave 1 secret-store workspace'
+          git push origin "HEAD:$GITHUB_HEAD_REF"
