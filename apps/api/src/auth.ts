@@ -19,6 +19,8 @@ const ARGON2_OPTIONS = Object.freeze({
   parallelism: 1,
 });
 
+const MAX_USERNAME_LENGTH = 64;
+const MAX_PASSWORD_LENGTH = 1024;
 export const DEFAULT_SESSION_TTL_MS = 12 * 60 * 60 * 1000;
 
 export interface PublicUser {
@@ -65,12 +67,18 @@ function validateUsername(username: string): string {
 }
 
 function validatePassword(password: string): void {
-  if (password.length < 12 || password.length > 1024) {
+  if (password.length < 12 || password.length > MAX_PASSWORD_LENGTH) {
     throw new AuthError(
       'INVALID_PASSWORD',
       400,
       'Password must contain between 12 and 1024 characters.',
     );
+  }
+}
+
+function assertLoginInputBounded(username: string, password: string): void {
+  if (username.length > MAX_USERNAME_LENGTH || password.length > MAX_PASSWORD_LENGTH) {
+    throw new AuthError('INVALID_CREDENTIALS', 401, 'Invalid username or password.');
   }
 }
 
@@ -111,6 +119,7 @@ export class AuthService {
   }
 
   async login(username: string, password: string): Promise<CreatedSession> {
+    assertLoginInputBounded(username, password);
     const user = this.repository.findUserByUsername(username.trim());
 
     if (!user) {
