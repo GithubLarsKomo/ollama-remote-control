@@ -12,6 +12,10 @@ import {
   SqliteAuthRepository,
 } from '@orc/db';
 import {
+  loadConfiguredMasterKey,
+  type MasterKeyEnvironment,
+} from '@orc/security';
+import {
   AuthError,
   AuthService,
   DEFAULT_SESSION_TTL_MS,
@@ -29,6 +33,7 @@ export interface BuildServerOptions {
   readonly databasePath?: string;
   readonly now?: () => Date;
   readonly sessionTtlMs?: number;
+  readonly environment?: MasterKeyEnvironment;
 }
 
 interface CredentialsBody {
@@ -107,6 +112,10 @@ function publicSession(session: StoredSession) {
 }
 
 export function buildServer(options: BuildServerOptions = {}): FastifyInstance {
+  // Validate an explicitly configured external master key before opening the
+  // application database. Absence is allowed until encrypted credentials are used.
+  loadConfiguredMasterKey(options.environment ?? process.env);
+
   const database = openDatabase(options.databasePath ?? ':memory:');
   applyMigrations(database);
   const now = options.now ?? (() => new Date());
@@ -207,6 +216,7 @@ export function buildServer(options: BuildServerOptions = {}): FastifyInstance {
 async function main(): Promise<void> {
   const app = buildServer({
     databasePath: process.env.ORC_DATABASE_PATH ?? '/data/ollama-remote-control.sqlite',
+    environment: process.env,
   });
   const port = Number(process.env.PORT ?? 3000);
   const host = process.env.HOST ?? '0.0.0.0';
