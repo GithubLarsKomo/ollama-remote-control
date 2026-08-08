@@ -105,43 +105,90 @@ test('Compose validation fails safely for unavailable CLI and container mismatch
   );
 });
 
-test('standalone analyzer permits simple Ollama config but enumerates unsupported high-impact settings', () => {
-  const simple = analyzeStandaloneReconstruction({
+test('standalone analyzer accepts ordinary Docker defaults without treating them as custom recreate requirements', () => {
+  const containerId = '1234567890abcdef1234567890abcdef';
+  const strategy = analyzeStandaloneReconstruction({
+    Id: containerId,
     Config: {
+      Hostname: containerId.slice(0, 12),
+      Domainname: '',
       Env: ['OLLAMA_HOST=0.0.0.0:11434'],
       Labels: { purpose: 'ollama' },
       Cmd: ['serve'],
       Entrypoint: null,
+      Tty: false,
+      OpenStdin: false,
+      StdinOnce: false,
     },
     HostConfig: {
       PortBindings: { '11434/tcp': [{ HostIp: '127.0.0.1', HostPort: '11434' }] },
       RestartPolicy: { Name: 'unless-stopped' },
       NetworkMode: 'bridge',
+      Runtime: 'runc',
+      ShmSize: 67108864,
+      Init: null,
+      OomScoreAdj: 0,
+      PublishAllPorts: false,
+      Isolation: '',
+      ConsoleSize: [0, 0],
+      LogConfig: { Type: 'json-file', Config: {} },
+      CgroupnsMode: 'private',
     },
     Mounts: [{ Type: 'bind', Source: '/srv/ollama', Destination: '/root/.ollama' }],
     NetworkSettings: { Networks: { bridge: {} } },
   });
-  assert.equal(simple.type, 'standalone');
-  assert.equal(simple.executable, true);
-  assert.deepEqual(simple.unsupportedFields, []);
-  assert.equal(simple.summary.environmentCount, 1);
-  assert.equal(simple.summary.mountCount, 1);
+  assert.equal(strategy.type, 'standalone');
+  assert.equal(strategy.executable, true);
+  assert.deepEqual(strategy.unsupportedFields, []);
+  assert.equal(strategy.summary.environmentCount, 1);
+  assert.equal(strategy.summary.mountCount, 1);
+});
 
+test('standalone analyzer enumerates unsupported high-impact and non-default runtime settings without secret values', () => {
   const blocked = analyzeStandaloneReconstruction({
-    Config: { Env: ['OLLAMA_API_KEY=must-not-leak'] },
+    Id: 'container-id',
+    Config: {
+      Env: ['OLLAMA_API_KEY=must-not-leak'],
+      Hostname: 'custom-host',
+      Domainname: 'internal.example',
+      Tty: true,
+      OpenStdin: true,
+      StdinOnce: true,
+    },
     HostConfig: {
       Privileged: true,
       DeviceRequests: [{ Driver: 'nvidia', Count: -1 }],
       CapAdd: ['SYS_ADMIN'],
+      ShmSize: 134217728,
+      Runtime: 'kata',
+      Init: true,
+      OomScoreAdj: 100,
+      PublishAllPorts: true,
+      Isolation: 'hyperv',
+      ConsoleSize: [80, 25],
+      LogConfig: { Type: 'journald', Config: { tag: 'ollama' } },
     },
     Mounts: [{ Type: 'tmpfs', Destination: '/tmp' }],
     NetworkSettings: { Networks: { first: {}, second: {} } },
   });
   assert.equal(blocked.executable, false);
   assert.deepEqual(blocked.unsupportedFields, [
+    'Config.Domainname',
+    'Config.Hostname',
+    'Config.OpenStdin',
+    'Config.StdinOnce',
+    'Config.Tty',
     'HostConfig.CapAdd',
+    'HostConfig.ConsoleSize',
     'HostConfig.DeviceRequests',
+    'HostConfig.Init',
+    'HostConfig.Isolation',
+    'HostConfig.LogConfig',
+    'HostConfig.OomScoreAdj',
     'HostConfig.Privileged',
+    'HostConfig.PublishAllPorts',
+    'HostConfig.Runtime',
+    'HostConfig.ShmSize',
     'Mounts.type:tmpfs',
     'NetworkSettings.Networks.multiple',
   ]);
