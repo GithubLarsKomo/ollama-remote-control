@@ -19,6 +19,7 @@ import {
   formatTemperature,
   formatTimestamp,
 } from './format.js';
+import OnboardingPanel from './OnboardingPanel.js';
 import UpdatePanel from './UpdatePanel.js';
 
 type AppPhase = 'loading' | 'bootstrap' | 'login' | 'authenticated' | 'fatal';
@@ -233,17 +234,18 @@ function Dashboard({ session, onSignedOut }: { readonly session: SessionView; re
     [selectedTargetId, targets],
   );
 
-  const loadCatalog = useCallback(async () => {
+  const loadCatalog = useCallback(async (preferredTargetId?: string) => {
     setCatalogBusy(true);
     setError(null);
     try {
       const response = await api.listTargets();
       setTargets(response.targets);
-      setSelectedTargetId((current) => (
-        response.targets.some((target) => target.id === current)
+      setSelectedTargetId((current) => {
+        if (preferredTargetId && response.targets.some((target) => target.id === preferredTargetId)) return preferredTargetId;
+        return response.targets.some((target) => target.id === current)
           ? current
-          : response.targets[0]?.id ?? ''
-      ));
+          : response.targets[0]?.id ?? '';
+      });
     } catch (loadError) {
       if (loadError instanceof ApiError && loadError.status === 401) {
         onSignedOut();
@@ -292,6 +294,11 @@ function Dashboard({ session, onSignedOut }: { readonly session: SessionView; re
     }
   }
 
+  async function onboardingCompleted(target: TargetCatalogEntry): Promise<void> {
+    setStatus(null);
+    await loadCatalog(target.id);
+  }
+
   return (
     <div className="app-shell">
       <header className="topbar">
@@ -314,35 +321,35 @@ function Dashboard({ session, onSignedOut }: { readonly session: SessionView; re
             <h1 id="dashboard-title">Ollama status</h1>
             <p className="muted">SSH, Docker and Ollama remain server-side. Mutating workflows use server-issued plans and explicit confirmation.</p>
           </div>
-          <div className="target-controls">
-            <label>
-              Target
-              <select
-                disabled={catalogBusy || targets.length === 0 || updateBusy}
-                onChange={(event) => setSelectedTargetId(event.target.value)}
-                value={selectedTargetId}
+          {targets.length > 0 ? (
+            <div className="target-controls">
+              <label>
+                Target
+                <select
+                  disabled={catalogBusy || updateBusy}
+                  onChange={(event) => setSelectedTargetId(event.target.value)}
+                  value={selectedTargetId}
+                >
+                  {targets.map((target) => <option key={target.id} value={target.id}>{target.displayName}</option>)}
+                </select>
+              </label>
+              <button
+                className="secondary-button"
+                disabled={!selectedTargetId || statusBusy || updateBusy}
+                onClick={() => void loadStatus(selectedTargetId)}
+                type="button"
               >
-                {targets.map((target) => <option key={target.id} value={target.id}>{target.displayName}</option>)}
-              </select>
-            </label>
-            <button
-              className="secondary-button"
-              disabled={!selectedTargetId || statusBusy || updateBusy}
-              onClick={() => void loadStatus(selectedTargetId)}
-              type="button"
-            >
-              {statusBusy ? 'Refreshing…' : 'Refresh'}
-            </button>
-          </div>
+                {statusBusy ? 'Refreshing…' : 'Refresh'}
+              </button>
+            </div>
+          ) : null}
         </section>
 
         {error ? <p className="error-box" role="alert">{error}</p> : null}
         {catalogBusy ? <p className="loading-box" role="status">Loading targets…</p> : null}
+
         {!catalogBusy && targets.length === 0 ? (
-          <section className="empty-state">
-            <h2>No enabled Ollama target</h2>
-            <p className="muted">Create and select a target through the API onboarding flow before using the dashboard.</p>
-          </section>
+          <OnboardingPanel onCompleted={onboardingCompleted} onSignedOut={onSignedOut} />
         ) : null}
 
         {selectedTarget ? (
