@@ -71,17 +71,27 @@ export function exactDigestImageReference(imageReference: string, digest: string
   return `${repository}@${normalizedDigest}`;
 }
 
+export function isExactDigestImageReference(reference: string): boolean {
+  return digestParts(reference) !== null;
+}
+
+export function sameExactImageReference(actual: string, expected: string): boolean {
+  const left = digestParts(actual);
+  const right = digestParts(expected);
+  return Boolean(left && right && left.repository === right.repository && left.digest === right.digest);
+}
+
 export function composeDigestOverrideJson(service: string, exactImageReference: string): string {
   if (!service.trim() || service.length > 200) {
     throw new ComposeIntentError('COMPOSE_PIN_VALIDATION_FAILED', 'Compose service name is invalid.');
   }
-  if (!digestParts(exactImageReference)) {
+  if (!isExactDigestImageReference(exactImageReference)) {
     throw new ComposeIntentError('INVALID_IMAGE_REFERENCE', 'Exact image reference must contain a valid digest.');
   }
   return `${JSON.stringify({ services: { [service]: { image: exactImageReference } } })}\n`;
 }
 
-function composeBaseArgv(context: ComposeSnapshotContext): string[] {
+export function composeContextArgv(context: ComposeSnapshotContext, includeStdinOverride = false): string[] {
   const argv = [
     'docker', 'compose',
     '-p', context.projectName,
@@ -89,14 +99,8 @@ function composeBaseArgv(context: ComposeSnapshotContext): string[] {
   ];
   for (const environmentFile of context.environmentFiles) argv.push('--env-file', environmentFile);
   for (const file of context.configFiles) argv.push('-f', file);
-  argv.push('-f', '-');
+  if (includeStdinOverride) argv.push('-f', '-');
   return argv;
-}
-
-function sameExactImage(actual: string, expected: string): boolean {
-  const left = digestParts(actual);
-  const right = digestParts(expected);
-  return Boolean(left && right && left.repository === right.repository && left.digest === right.digest);
 }
 
 export async function validateComposeDigestOverride(
@@ -106,14 +110,14 @@ export async function validateComposeDigestOverride(
 ): Promise<{ readonly exactImageReference: string; readonly overrideJson: string }> {
   const overrideJson = composeDigestOverrideJson(context.service, exactImageReference);
   const result = await executor.exec(
-    [...composeBaseArgv(context), 'config', '--images', context.service],
+    [...composeContextArgv(context, true), 'config', '--images', context.service],
     overrideJson,
   );
   if (result.exitCode !== 0) {
     throw new ComposeIntentError('COMPOSE_PIN_VALIDATION_FAILED', 'Digest-pinned Compose override could not be validated.');
   }
   const images = [...new Set(result.stdout.split(/\r?\n/u).map((value) => value.trim()).filter(Boolean))];
-  if (images.length !== 1 || !sameExactImage(images[0], exactImageReference)) {
+  if (images.length !== 1 || !sameExactImageReference(images[0], exactImageReference)) {
     throw new ComposeIntentError('COMPOSE_PIN_MISMATCH', 'Compose did not resolve the service to the intended digest-pinned image.');
   }
   return { exactImageReference, overrideJson };
