@@ -1,7 +1,8 @@
 # ADR-0004 — Local admin password and session security
 
-- **State:** proposed
+- **State:** accepted
 - **Date:** 2026-08-08
+- **Accepted:** 2026-08-08
 - **Decision owner/approver:** product owner
 
 ## Question
@@ -40,7 +41,7 @@ How should the MVP store the local administrator password and represent browser 
 **Benefit:** stable platform API and no dependency.  
 **Cost:** valid fallback, but contrary to the SPEC preference when a mature Argon2id implementation is available.
 
-## Proposed decision
+## Decision
 
 Use **Alternative B** for local administrator passwords:
 
@@ -75,20 +76,23 @@ Initial login brute-force protection is a per-process, per-client-IP failure win
 - Raw session and CSRF tokens are never persisted.
 - Login responses use the same public error for unknown username and wrong password.
 - Unknown-user login performs an Argon2 operation to reduce username timing disclosure.
+- Login username/password sizes are bounded before an expensive Argon2 verify operation.
 - Admin bootstrap uses an atomic SQLite insert guard so concurrent bootstrap requests cannot create multiple initial administrators.
 
-## Acceptance gate
+## Validation evidence
 
-Before changing this ADR to `accepted`, CI must prove:
+The final read-only GitHub Actions run used the committed lockfile with `npm ci` and passed:
 
-1. Argon2id hashes are stored instead of plaintext passwords.
-2. concurrent bootstrap creates exactly one administrator.
-3. valid login sets both cookies with required security attributes.
-4. only token digests are present in SQLite.
-5. current-session lookup rejects missing, revoked and expired sessions.
-6. logout without matching CSRF header fails.
-7. valid logout revokes the server-side session.
-8. existing foundation, SSH, streaming and Docker gates remain green.
+1. Argon2id hashes stored instead of plaintext passwords — **passed**.
+2. concurrent bootstrap creates exactly one administrator — **passed**.
+3. valid login sets both cookies with required security attributes — **passed**.
+4. only session and CSRF token digests are present in SQLite — **passed**.
+5. current-session lookup rejects revoked and expired sessions — **passed**.
+6. logout without matching CSRF header fails — **passed**.
+7. valid logout revokes the server-side session — **passed**.
+8. five failed logins trigger a 60-second per-IP rate limit and recover after expiry — **passed**.
+9. oversized login input is rejected before expensive password verification — **passed**.
+10. existing foundation, SSH, streaming and Docker gates remain green — **passed**.
 
 ## Rollback / exit path
 
@@ -99,3 +103,4 @@ Password hashes encode their algorithm and work parameters. A later password has
 - `docs/SPEC.md`
 - `SECURITY.md`
 - Issue #3
+- PR #4
