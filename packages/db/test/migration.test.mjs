@@ -15,13 +15,19 @@ test('migrations are idempotent and preserve host-target ownership', () => {
   const database = openDatabase(databasePath);
 
   try {
-    assert.equal(applyMigrations(database), 3);
-    assert.equal(applyMigrations(database), 3);
-    assert.equal(getSchemaVersion(database), 3);
+    assert.equal(applyMigrations(database), 4);
+    assert.equal(applyMigrations(database), 4);
+    assert.equal(getSchemaVersion(database), 4);
 
     database
       .prepare('INSERT INTO hosts(id, display_name, hostname, port, username) VALUES (?, ?, ?, ?, ?)')
       .run('host-1', 'Primary host', 'ollama.internal', 22, 'orc-admin');
+
+    assert.throws(() => {
+      database
+        .prepare('INSERT INTO hosts(id, display_name, hostname, port, username) VALUES (?, ?, ?, ?, ?)')
+        .run('host-duplicate', 'Duplicate', 'OLLAMA.INTERNAL', 22, 'ORC-ADMIN');
+    });
 
     database
       .prepare('INSERT INTO ollama_targets(id, host_id, display_name) VALUES (?, ?, ?)')

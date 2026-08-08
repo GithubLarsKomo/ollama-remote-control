@@ -4,7 +4,9 @@ import { dirname, resolve } from 'node:path';
 import type {
   AuthRepository,
   EncryptedSecret,
+  HostOnboardingRepository,
   SshCredentialRepository,
+  StoredHost,
   StoredSession,
   StoredSshCredential,
   StoredUser,
@@ -53,6 +55,11 @@ const migrations: readonly Migration[] = [
     version: 3,
     name: 'ssh-credentials',
     source: new URL('../migrations/0003_ssh_credentials.sql', import.meta.url),
+  },
+  {
+    version: 4,
+    name: 'host-identity',
+    source: new URL('../migrations/0004_host_identity.sql', import.meta.url),
   },
 ];
 
@@ -158,6 +165,46 @@ function mapSshCredential(
     createdAt: String(row.created_at),
     updatedAt: String(row.updated_at),
   };
+}
+
+function mapHost(row: Record<string, unknown> | undefined): StoredHost | null {
+  if (!row) return null;
+  return {
+    id: String(row.id),
+    displayName: String(row.display_name),
+    hostname: String(row.hostname),
+    port: Number(row.port),
+    username: String(row.username),
+    hostKeyFingerprint: String(row.host_key_fingerprint),
+    enabled: Number(row.enabled) === 1,
+    createdAt: String(row.created_at),
+    updatedAt: String(row.updated_at),
+  };
+}
+
+function insertCredential(
+  database: DatabaseConnection,
+  credential: StoredSshCredential,
+): void {
+  const encrypted = credential.encryptedPrivateKey;
+  database
+    .prepare(`
+      INSERT INTO ssh_credentials(
+        id, host_id, algorithm, key_version, nonce, ciphertext, auth_tag,
+        created_at, updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `)
+    .run(
+      credential.id,
+      credential.hostId,
+      encrypted.algorithm,
+      encrypted.keyVersion,
+      encrypted.nonce,
+      encrypted.ciphertext,
+      encrypted.authTag,
+      credential.createdAt,
+      credential.updatedAt,
+    );
 }
 
 export class SqliteAuthRepository implements AuthRepository {
@@ -275,6 +322,64 @@ export class SqliteSshCredentialRepository implements SshCredentialRepository {
             created_at, updated_at
           FROM ssh_credentials
           WHERE host_id = ?
+        `)
+        .get(hostId),
+    );
+  }
+}
+
+export class SqliteHostOnboardingRepository implements HostOnboardingRepository {
+  constructor(private readonly database: DatabaseConnection) {}
+
+  createHostWithCredential(host: StoredHost, credential: StoredSshCredential): boolean {
+    if (credential.hostId !== host.id) {
+      throw new Error('SSH credential host ID must match the host being created.');
+    }
+
+    this.database.exec('BEGIN IMMEDIATE');
+    try {
+      const hostInsert = this.database
+        .prepare(`
+          INSERT OR IGNORE INTO hosts(
+            id, display_name, hostname, port, username, host_key_fingerprint,
+            enabled, created_at, updated_at
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        `)
+        .run(
+          host.id,
+          host.displayName,
+          host.hostname,
+          host.port,
+          host.username,
+          host.hostKeyFingerprint,
+          host.enabled ? 1 : 0,
+          host.createdAt,
+          host.updatedAt,
+        );
+
+      if (hostInsert.changes !== 1) {
+        this.database.exec('ROLLBACK');
+        return false;
+      }
+
+      insertCredential(this.database, credential);
+      this.database.exec('COMMIT');
+      return true;
+    } catch (error) {
+      this.database.exec('ROLLBACK');
+      throw error;
+    }
+  }
+
+  findHostById(hostId: string): StoredHost | null {
+    return mapHost(
+      this.database
+        .prepare(`
+          SELECT
+            id, display_name, hostname, port, username, host_key_fingerprint,
+            enabled, created_at, updated_at
+          FROM hosts
+          WHERE id = ?
         `)
         .get(hostId),
     );

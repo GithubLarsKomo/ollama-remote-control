@@ -63,6 +63,11 @@ jobs:
         run: npm run build
 
       - name: Test product
+        env:
+          SSH_HOST: 127.0.0.1
+          SSH_PORT: '2222'
+          SSH_USER: orcspike
+          SSH_PRIVATE_KEY_PATH: ${{ runner.temp }}/orc_spike_key
         run: npm test
 
       - name: Run compatibility gates

@@ -2,6 +2,7 @@ import { pathToFileURL } from 'node:url';
 import Fastify, {
   type FastifyInstance,
   type FastifyReply,
+  type FastifyRequest,
 } from 'fastify';
 import type { ApiHealthResponse, StoredSession } from '@orc/core';
 import {
@@ -10,11 +11,13 @@ import {
   openDatabase,
   pingDatabase,
   SqliteAuthRepository,
+  SqliteHostOnboardingRepository,
 } from '@orc/db';
 import {
   loadConfiguredMasterKey,
   type MasterKeyEnvironment,
 } from '@orc/security';
+import { SshTransportError } from '@orc/ssh';
 import {
   AuthError,
   AuthService,
@@ -28,6 +31,12 @@ import {
   SESSION_COOKIE,
   sessionCookie,
 } from './cookies.js';
+import {
+  HostOnboardingError,
+  HostOnboardingService,
+  type HostCreateInput,
+  type HostProbeInput,
+} from './hosts.js';
 
 export interface BuildServerOptions {
   readonly databasePath?: string;
@@ -39,6 +48,18 @@ export interface BuildServerOptions {
 interface CredentialsBody {
   readonly username?: unknown;
   readonly password?: unknown;
+}
+
+interface HostProbeBody {
+  readonly hostname?: unknown;
+  readonly port?: unknown;
+}
+
+interface HostCreateBody extends HostProbeBody {
+  readonly displayName?: unknown;
+  readonly username?: unknown;
+  readonly confirmedFingerprint?: unknown;
+  readonly privateKey?: unknown;
 }
 
 interface LoginBucket {
@@ -87,13 +108,56 @@ function credentials(body: CredentialsBody): { username: string; password: strin
   return { username: body.username, password: body.password };
 }
 
+function hostProbeInput(body: HostProbeBody): HostProbeInput {
+  if (typeof body?.hostname !== 'string') {
+    throw new HostOnboardingError('INVALID_HOST', 400, 'SSH hostname is required.');
+  }
+  if (body.port !== undefined && typeof body.port !== 'number') {
+    throw new HostOnboardingError('INVALID_HOST', 400, 'SSH port must be a number.');
+  }
+  return { hostname: body.hostname, port: body.port };
+}
+
+function hostCreateInput(body: HostCreateBody): HostCreateInput {
+  const endpoint = hostProbeInput(body);
+  if (
+    typeof body.displayName !== 'string'
+    || typeof body.username !== 'string'
+    || typeof body.confirmedFingerprint !== 'string'
+    || typeof body.privateKey !== 'string'
+  ) {
+    throw new HostOnboardingError(
+      'INVALID_HOST',
+      400,
+      'Display name, username, confirmed fingerprint and private key are required.',
+    );
+  }
+  return {
+    ...endpoint,
+    displayName: body.displayName,
+    username: body.username,
+    confirmedFingerprint: body.confirmedFingerprint,
+    privateKey: body.privateKey,
+  };
+}
+
 function csrfHeader(value: string | string[] | undefined): string | undefined {
   return Array.isArray(value) ? value[0] : value;
 }
 
-function sendAuthError(reply: FastifyReply, error: unknown): FastifyReply {
-  if (error instanceof AuthError) {
+function sendApiError(reply: FastifyReply, error: unknown): FastifyReply {
+  if (error instanceof AuthError || error instanceof HostOnboardingError) {
     return reply.code(error.statusCode).send({
+      error: { code: error.code, message: error.message },
+    });
+  }
+  if (error instanceof SshTransportError) {
+    const statusCode = error.code === 'SSH_HOST_KEY_MISMATCH'
+      ? 409
+      : error.code === 'AUTH_FAILED'
+        ? 422
+        : 502;
+    return reply.code(statusCode).send({
       error: { code: error.code, message: error.message },
     });
   }
@@ -112,18 +176,34 @@ function publicSession(session: StoredSession) {
 }
 
 export function buildServer(options: BuildServerOptions = {}): FastifyInstance {
-  // Validate an explicitly configured external master key before opening the
-  // application database. Absence is allowed until encrypted credentials are used.
-  loadConfiguredMasterKey(options.environment ?? process.env);
-
+  const masterKey = loadConfiguredMasterKey(options.environment ?? process.env);
   const database = openDatabase(options.databasePath ?? ':memory:');
   applyMigrations(database);
   const now = options.now ?? (() => new Date());
   const sessionTtlMs = options.sessionTtlMs ?? DEFAULT_SESSION_TTL_MS;
   const auth = new AuthService(new SqliteAuthRepository(database), now, sessionTtlMs);
+  const hosts = new HostOnboardingService(
+    new SqliteHostOnboardingRepository(database),
+    masterKey,
+    now,
+  );
   const loginLimiter = new LoginLimiter();
 
   const app = Fastify({ logger: false });
+
+  function requireAuthenticatedMutation(request: FastifyRequest): StoredSession {
+    const cookies = parseCookies(request.headers.cookie);
+    const session = auth.getSession(cookies[SESSION_COOKIE]);
+    if (!session) {
+      throw new AuthError('UNAUTHENTICATED', 401, 'Authentication is required.');
+    }
+    const headerToken = csrfHeader(request.headers['x-csrf-token']);
+    if (!headerToken || cookies[CSRF_COOKIE] !== headerToken) {
+      throw new AuthError('CSRF_INVALID', 403, 'CSRF token is invalid.');
+    }
+    auth.assertCsrf(session, headerToken);
+    return session;
+  }
 
   app.get('/api/v1/health', async (): Promise<ApiHealthResponse> => {
     if (!pingDatabase(database)) {
@@ -151,7 +231,7 @@ export function buildServer(options: BuildServerOptions = {}): FastifyInstance {
       const user = await auth.bootstrapAdmin(input.username, input.password);
       return reply.code(201).send({ user });
     } catch (error) {
-      return sendAuthError(reply, error);
+      return sendApiError(reply, error);
     }
   });
 
@@ -172,7 +252,7 @@ export function buildServer(options: BuildServerOptions = {}): FastifyInstance {
       if (error instanceof AuthError && error.code === 'INVALID_CREDENTIALS') {
         loginLimiter.recordFailure(limiterKey, now().getTime());
       }
-      return sendAuthError(reply, error);
+      return sendApiError(reply, error);
     }
   });
 
@@ -187,22 +267,32 @@ export function buildServer(options: BuildServerOptions = {}): FastifyInstance {
 
   app.delete('/api/v1/session', async (request, reply) => {
     try {
-      const cookies = parseCookies(request.headers.cookie);
-      const session = auth.getSession(cookies[SESSION_COOKIE]);
-      if (!session) {
-        throw new AuthError('UNAUTHENTICATED', 401, 'Authentication is required.');
-      }
-
-      const headerToken = csrfHeader(request.headers['x-csrf-token']);
-      if (!headerToken || cookies[CSRF_COOKIE] !== headerToken) {
-        throw new AuthError('CSRF_INVALID', 403, 'CSRF token is invalid.');
-      }
-      auth.assertCsrf(session, headerToken);
+      const session = requireAuthenticatedMutation(request);
       auth.logout(session);
       reply.header('set-cookie', clearSessionCookies());
       return reply.code(204).send();
     } catch (error) {
-      return sendAuthError(reply, error);
+      return sendApiError(reply, error);
+    }
+  });
+
+  app.post<{ Body: HostProbeBody }>('/api/v1/hosts/probe', async (request, reply) => {
+    try {
+      requireAuthenticatedMutation(request);
+      const observed = await hosts.probe(hostProbeInput(request.body));
+      return reply.send(observed);
+    } catch (error) {
+      return sendApiError(reply, error);
+    }
+  });
+
+  app.post<{ Body: HostCreateBody }>('/api/v1/hosts', async (request, reply) => {
+    try {
+      requireAuthenticatedMutation(request);
+      const host = await hosts.create(hostCreateInput(request.body));
+      return reply.code(201).send({ host });
+    } catch (error) {
+      return sendApiError(reply, error);
     }
   });
 

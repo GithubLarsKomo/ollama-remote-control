@@ -9,7 +9,8 @@
   "references": [
     { "path": "../../packages/core" },
     { "path": "../../packages/security" },
-    { "path": "../../packages/db" }
+    { "path": "../../packages/db" },
+    { "path": "../../packages/ssh" }
   ],
   "include": ["src/**/*.ts"]
 }
