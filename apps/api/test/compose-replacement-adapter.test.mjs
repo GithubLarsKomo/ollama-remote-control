@@ -72,11 +72,7 @@ if [[ "${'$'}{1:-}" == 'image' && "${'$'}{2:-}" == 'inspect' ]]; then
 fi
 
 if [[ "${'$'}{1:-}" == 'compose' ]]; then
-  expected_prefix=(compose -p orc-stack --project-directory /srv/orc -f /srv/orc/compose.yml)
-  for i in "${'$'}{!expected_prefix[@]}"; do
-    position=$((i + 1))
-    [[ "${'$'}{!position:-}" == "${'$'}{expected_prefix[$i]}" ]] || { printf 'bad compose context\\n' >&2; exit 64; }
-  done
+  [[ "${'$'}{2:-}" == '-p' && "${'$'}{3:-}" == 'orc-stack' && "${'$'}{4:-}" == '--project-directory' && "${'$'}{5:-}" == '/srv/orc' && "${'$'}{6:-}" == '-f' && "${'$'}{7:-}" == '/srv/orc/compose.yml' ]] || { printf 'bad compose context\\n' >&2; exit 64; }
 
   if [[ "${'$'}{8:-}" == '-f' && "${'$'}{9:-}" == '-' && "${'$'}{10:-}" == 'config' && "${'$'}{11:-}" == '--images' && "${'$'}{12:-}" == 'ollama' ]]; then
     payload="$(cat)"
@@ -177,8 +173,8 @@ test('OpenSSH adapter performs exact forward replacement then local-only rollbac
     assert.equal(calls.some((line) => / compose .*\b(down|build)\b/u.test(line)), false);
 
     const stdinLog = await readRemote(conn, REMOTE_STDIN_LOG);
-    assert.match(stdinLog, new RegExp(CANDIDATE_DIGEST.replace(':', '\\:'), 'u'));
-    assert.match(stdinLog, new RegExp(ROLLBACK_DIGEST.replace(':', '\\:'), 'u'));
+    assert.equal(stdinLog.includes(CANDIDATE_DIGEST), true);
+    assert.equal(stdinLog.includes(ROLLBACK_DIGEST), true);
     assert.equal((stdinLog.match(/^up:/gmu) ?? []).length, 2);
   } finally {
     await cleanup(conn);
