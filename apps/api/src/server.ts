@@ -71,6 +71,10 @@ import {
   UpdatePreflightError,
   UpdatePreflightService,
 } from './update-preflight.js';
+import {
+  UpdateStrategyError,
+  UpdateStrategyService,
+} from './update-strategy.js';
 
 export interface BuildServerOptions {
   readonly databasePath?: string;
@@ -91,7 +95,7 @@ interface TargetSelectionBody { readonly containerId?: unknown; readonly display
 interface ContainerLifecycleBody { readonly confirmation?: ContainerLifecycleConfirmation; }
 interface HostParams { readonly hostId: string; }
 interface TargetParams { readonly targetId: string; }
-interface UpdatePlanQuery { readonly snapshotId?: unknown; }
+interface SnapshotQuery { readonly snapshotId?: unknown; }
 interface LogQuery { readonly tail?: unknown; }
 interface LoginBucket { failures: number; resetAt: number; }
 
@@ -129,6 +133,12 @@ function hostCreateInput(body: HostCreateBody): HostCreateInput {
   return { ...endpoint, displayName: body.displayName, username: body.username, confirmedFingerprint: body.confirmedFingerprint, privateKey: body.privateKey };
 }
 function csrfHeader(value: string | string[] | undefined): string | undefined { return Array.isArray(value) ? value[0] : value; }
+function requireSnapshotId(query: SnapshotQuery): string {
+  if (typeof query?.snapshotId !== 'string' || !query.snapshotId.trim()) {
+    throw new UpdatePlanError('INVALID_UPDATE_SNAPSHOT', 400, 'snapshotId query parameter is required.');
+  }
+  return query.snapshotId.trim();
+}
 function sendApiError(reply: FastifyReply, error: unknown): FastifyReply {
   if (
     error instanceof AuthError
@@ -140,6 +150,7 @@ function sendApiError(reply: FastifyReply, error: unknown): FastifyReply {
     || error instanceof JobServiceError
     || error instanceof UpdatePreflightError
     || error instanceof UpdatePlanError
+    || error instanceof UpdateStrategyError
   ) {
     return reply.code(error.statusCode).send({ error: { code: error.code, message: error.message } });
   }
@@ -192,6 +203,14 @@ export function buildServer(options: BuildServerOptions = {}): FastifyInstance {
     now,
   );
   const updatePlan = new UpdatePlanService(
+    hostRepository,
+    credentialRepository,
+    targetRepository,
+    snapshotRepository,
+    masterKey,
+    auditService,
+  );
+  const updateStrategy = new UpdateStrategyService(
     hostRepository,
     credentialRepository,
     targetRepository,
@@ -313,13 +332,17 @@ export function buildServer(options: BuildServerOptions = {}): FastifyInstance {
     } catch (error) { return sendApiError(reply, error); }
   });
 
-  app.get<{ Params: TargetParams; Querystring: UpdatePlanQuery }>('/api/v1/targets/:targetId/container/update-plan', async (request, reply) => {
+  app.get<{ Params: TargetParams; Querystring: SnapshotQuery }>('/api/v1/targets/:targetId/container/update-plan', async (request, reply) => {
     try {
       const session = requireAuthenticated(request);
-      if (typeof request.query?.snapshotId !== 'string' || !request.query.snapshotId.trim()) {
-        throw new UpdatePlanError('INVALID_UPDATE_SNAPSHOT', 400, 'snapshotId query parameter is required.');
-      }
-      return reply.send({ plan: await updatePlan.create(request.params.targetId, request.query.snapshotId.trim(), session.userId) });
+      return reply.send({ plan: await updatePlan.create(request.params.targetId, requireSnapshotId(request.query), session.userId) });
+    } catch (error) { return sendApiError(reply, error); }
+  });
+
+  app.get<{ Params: TargetParams; Querystring: SnapshotQuery }>('/api/v1/targets/:targetId/container/update-strategy', async (request, reply) => {
+    try {
+      const session = requireAuthenticated(request);
+      return reply.send(await updateStrategy.create(request.params.targetId, requireSnapshotId(request.query), session.userId));
     } catch (error) { return sendApiError(reply, error); }
   });
 
