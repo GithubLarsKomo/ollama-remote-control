@@ -120,6 +120,7 @@ test('target status exposes Docker/Ollama/GPU/disk while masking sensitive Ollam
       headers: { cookie: cookieHeader(cookies) },
     });
     assert.equal(response.statusCode, 200);
+    assert.equal(response.body.includes('top-secret'), false);
     const status = response.json();
     assert.equal(status.target.id, targetId);
     assert.equal(status.target.selectedContainerId, 'ollama-container-id');
@@ -127,6 +128,7 @@ test('target status exposes Docker/Ollama/GPU/disk while masking sensitive Ollam
     assert.equal(status.container.running, true);
     assert.equal(status.container.status, 'healthy');
     assert.equal(status.container.restartCount, 2);
+    assert.equal('env' in status.container, false);
     assert.equal(status.ollama.available, true);
     assert.equal(status.ollama.version, '0.32.5');
 
