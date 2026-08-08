@@ -61,12 +61,16 @@ test('database enforces one active mutation per target while allowing read jobs 
     assert.deepEqual(jobs.listEvents('mutation-1').map((item) => item.sequence), [1, 2]);
     assert.equal(jobs.appendEvent({ id: 'event-7', jobId: 'mutation-1', eventType: 'note', payloadJson: '{}', createdAt: NOW }).sequence, 3);
     assert.deepEqual(jobs.listEvents('mutation-1').map((item) => item.sequence), [1, 2, 3]);
+
+    assert.throws(() => {
+      database.prepare(`UPDATE job_events SET payload_json = '{"tampered":true}' WHERE id = ?`).run('event-7');
+    }, /append-only/u);
   } finally {
     database.close();
   }
 });
 
-test('non-terminal jobs and audit rows survive database reopen for later reconciliation', () => {
+test('non-terminal jobs and audit rows survive reopen and audit identity survives entity cleanup', () => {
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'orc-jobs-reopen-'));
   const databasePath = path.join(directory, 'jobs.sqlite');
   let database = openDatabase(databasePath);
@@ -96,8 +100,22 @@ test('non-terminal jobs and audit rows survive database reopen for later reconci
     assert.equal(recoverable[0].id, 'job-running');
     assert.equal(recoverable[0].state, 'running');
     assert.deepEqual(jobs.listEvents('job-running').map((item) => item.sequence), [1, 2]);
-    const rows = audit.listByTarget('target-1');
+
+    let rows = audit.listByTarget('target-1');
     assert.equal(rows.length, 1);
+    assert.equal(rows[0].jobId, 'job-running');
+    assert.throws(() => {
+      database.prepare(`UPDATE audit_events SET result = 'tampered' WHERE id = ?`).run('audit-1');
+    }, /append-only/u);
+
+    database.prepare('DELETE FROM ollama_targets WHERE id = ?').run('target-1');
+    database.prepare('DELETE FROM hosts WHERE id = ?').run('host-1');
+    database.prepare('DELETE FROM users WHERE id = ?').run('user-1');
+    rows = audit.listByTarget('target-1');
+    assert.equal(rows.length, 1);
+    assert.equal(rows[0].actorUserId, 'user-1');
+    assert.equal(rows[0].hostId, 'host-1');
+    assert.equal(rows[0].targetId, 'target-1');
     assert.equal(rows[0].jobId, 'job-running');
   } finally {
     database.close();
