@@ -65,11 +65,13 @@ describe('live log stream request', () => {
 });
 
 describe('incremental SSE parser', () => {
-  it('parses frames split across arbitrary network chunks and preserves multiline data', () => {
+  it('parses frames split across arbitrary network and CRLF boundaries and preserves multiline data', () => {
     const parser = new SseParser();
     expect(parser.push('event: rea')).toEqual([]);
-    expect(parser.push('dy\r\ndata: {"tail":')).toEqual([]);
-    expect(parser.push('100}\r\n\r\nevent: log\ndata: first\ndata: second\n\n')).toEqual([
+    expect(parser.push('dy\r')).toEqual([]);
+    expect(parser.push('\ndata: {"tail":100}\r')).toEqual([]);
+    expect(parser.push('\n\r')).toEqual([]);
+    expect(parser.push('\nevent: log\ndata: first\ndata: second\n\n')).toEqual([
       { event: 'ready', data: '{"tail":100}' },
       { event: 'log', data: 'first\nsecond' },
     ]);
