@@ -307,7 +307,7 @@ function Dashboard({ session, onSignedOut }: { readonly session: SessionView; re
     await loadCatalog(target.id);
   }
 
-  const summaryContainerId = status?.target.id === selectedTarget?.id
+  const summaryContainerId = status && selectedTarget && status.target.id === selectedTarget.id
     ? status.target.selectedContainerId
     : selectedTarget?.selectedContainerId;
 
