@@ -56,6 +56,10 @@ import {
   TargetLogService,
 } from './logs.js';
 import {
+  OllamaHealthError,
+  OllamaHealthService,
+} from './ollama-health.js';
+import {
   TargetStatusError,
   TargetStatusService,
 } from './status.js';
@@ -146,6 +150,7 @@ function sendApiError(reply: FastifyReply, error: unknown): FastifyReply {
     || error instanceof TargetDiscoveryError
     || error instanceof TargetStatusError
     || error instanceof TargetLogError
+    || error instanceof OllamaHealthError
     || error instanceof ContainerLifecycleError
     || error instanceof JobServiceError
     || error instanceof UpdatePreflightError
@@ -185,6 +190,7 @@ export function buildServer(options: BuildServerOptions = {}): FastifyInstance {
   const targets = new TargetDiscoveryService(hostRepository, credentialRepository, targetRepository, masterKey, now);
   const targetStatus = new TargetStatusService(hostRepository, credentialRepository, targetRepository, masterKey);
   const targetLogs = new TargetLogService(hostRepository, credentialRepository, targetRepository, masterKey);
+  const ollamaHealth = new OllamaHealthService(hostRepository, credentialRepository, targetRepository, masterKey);
   const containerLifecycle = new ContainerLifecycleService(
     hostRepository,
     credentialRepository,
@@ -302,6 +308,12 @@ export function buildServer(options: BuildServerOptions = {}): FastifyInstance {
     try {
       requireAuthenticated(request);
       return reply.send(await targetStatus.read(request.params.targetId));
+    } catch (error) { return sendApiError(reply, error); }
+  });
+  app.get<{ Params: TargetParams }>('/api/v1/targets/:targetId/health', async (request, reply) => {
+    try {
+      requireAuthenticated(request);
+      return reply.send(await ollamaHealth.read(request.params.targetId));
     } catch (error) { return sendApiError(reply, error); }
   });
 
