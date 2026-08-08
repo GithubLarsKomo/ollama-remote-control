@@ -105,7 +105,7 @@ export interface StoredOllamaTarget {
 }
 
 export interface OllamaTargetRepository {
-  saveSelection(target: StoredOllamaTarget): void;
+  saveSelection(target: StoredOllamaTarget): StoredOllamaTarget;
   findByHostId(hostId: HostId): readonly StoredOllamaTarget[];
 }
 
