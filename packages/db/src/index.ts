@@ -2,12 +2,19 @@ import { createRequire } from 'node:module';
 import { mkdirSync, readFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import type {
+  AuditRepository,
   AuthRepository,
   EncryptedSecret,
   HostOnboardingRepository,
+  JobRepository,
+  JobState,
+  JobTransitionUpdate,
   OllamaTargetRepository,
   SshCredentialRepository,
+  StoredAuditEvent,
   StoredHost,
+  StoredJob,
+  StoredJobEvent,
   StoredOllamaTarget,
   StoredSession,
   StoredSshCredential,
@@ -41,6 +48,7 @@ const migrations: readonly Migration[] = [
   { version: 3, name: 'ssh-credentials', source: new URL('../migrations/0003_ssh_credentials.sql', import.meta.url) },
   { version: 4, name: 'host-identity', source: new URL('../migrations/0004_host_identity.sql', import.meta.url) },
   { version: 5, name: 'target-binding', source: new URL('../migrations/0005_target_binding.sql', import.meta.url) },
+  { version: 6, name: 'jobs-audit', source: new URL('../migrations/0006_jobs_audit.sql', import.meta.url) },
 ];
 
 export function openDatabase(filename: string): DatabaseConnection {
@@ -100,9 +108,58 @@ function mapTarget(row: Record<string, unknown> | undefined): StoredOllamaTarget
   if (!row) return null;
   return { id: String(row.id), hostId: String(row.host_id), displayName: String(row.display_name), selectedContainerId: String(row.selected_container_id), containerNameOverride: row.container_name_override === null ? null : String(row.container_name_override), enabled: Number(row.enabled) === 1, createdAt: String(row.created_at), updatedAt: String(row.updated_at) };
 }
+function mapJob(row: Record<string, unknown> | undefined): StoredJob | null {
+  if (!row) return null;
+  return {
+    id: String(row.id),
+    targetId: String(row.target_id),
+    actorUserId: String(row.actor_user_id),
+    kind: String(row.kind),
+    mutating: Number(row.mutating) === 1,
+    state: String(row.state) as JobState,
+    createdAt: String(row.created_at),
+    startedAt: row.started_at === null ? null : String(row.started_at),
+    finishedAt: row.finished_at === null ? null : String(row.finished_at),
+    resultJson: row.result_json === null ? null : String(row.result_json),
+    errorClass: row.error_class === null ? null : String(row.error_class),
+    exitCode: row.exit_code === null ? null : Number(row.exit_code),
+  };
+}
+function mapJobEvent(row: Record<string, unknown>): StoredJobEvent {
+  return {
+    id: String(row.id),
+    jobId: String(row.job_id),
+    sequence: Number(row.sequence),
+    eventType: String(row.event_type),
+    payloadJson: String(row.payload_json),
+    createdAt: String(row.created_at),
+  };
+}
+function mapAuditEvent(row: Record<string, unknown>): StoredAuditEvent {
+  return {
+    id: String(row.id),
+    timestamp: String(row.timestamp),
+    actorUserId: String(row.actor_user_id),
+    hostId: row.host_id === null ? null : String(row.host_id),
+    targetId: row.target_id === null ? null : String(row.target_id),
+    action: String(row.action),
+    parametersRedactedJson: String(row.parameters_redacted_json),
+    result: String(row.result),
+    exitCode: row.exit_code === null ? null : Number(row.exit_code),
+    errorClass: row.error_class === null ? null : String(row.error_class),
+    jobId: row.job_id === null ? null : String(row.job_id),
+  };
+}
 function insertCredential(database: DatabaseConnection, credential: StoredSshCredential): void {
   const encrypted = credential.encryptedPrivateKey;
   database.prepare(`INSERT INTO ssh_credentials(id, host_id, algorithm, key_version, nonce, ciphertext, auth_tag, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(credential.id, credential.hostId, encrypted.algorithm, encrypted.keyVersion, encrypted.nonce, encrypted.ciphertext, encrypted.authTag, credential.createdAt, credential.updatedAt);
+}
+function nextJobEventSequence(database: DatabaseConnection, jobId: string): number {
+  return Number(database.prepare('SELECT COALESCE(MAX(sequence), 0) + 1 AS sequence FROM job_events WHERE job_id = ?').get(jobId)?.sequence ?? 1);
+}
+function insertJobEvent(database: DatabaseConnection, event: Omit<StoredJobEvent, 'sequence'>, sequence: number): StoredJobEvent {
+  database.prepare(`INSERT INTO job_events(id, job_id, sequence, event_type, payload_json, created_at) VALUES (?, ?, ?, ?, ?, ?)`).run(event.id, event.jobId, sequence, event.eventType, event.payloadJson, event.createdAt);
+  return { ...event, sequence };
 }
 
 export class SqliteAuthRepository implements AuthRepository {
@@ -150,5 +207,127 @@ export class SqliteOllamaTargetRepository implements OllamaTargetRepository {
   }
   findByHostId(hostId: string): readonly StoredOllamaTarget[] {
     return this.database.prepare(`SELECT id, host_id, display_name, container_name_override, selected_container_id, enabled, created_at, updated_at FROM ollama_targets WHERE host_id = ? AND selected_container_id IS NOT NULL ORDER BY display_name, id`).all(hostId).map((row) => mapTarget(row)!).filter(Boolean);
+  }
+}
+
+export class SqliteJobRepository implements JobRepository {
+  constructor(private readonly database: DatabaseConnection) {}
+
+  createWithInitialEvent(job: StoredJob, event: Omit<StoredJobEvent, 'sequence'>): boolean {
+    if (event.jobId !== job.id) throw new Error('Initial job event must belong to the created job.');
+    this.database.exec('BEGIN IMMEDIATE');
+    try {
+      const inserted = this.database.prepare(`
+        INSERT OR IGNORE INTO jobs(
+          id, target_id, actor_user_id, kind, mutating, state, created_at,
+          started_at, finished_at, result_json, error_class, exit_code
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `).run(
+        job.id, job.targetId, job.actorUserId, job.kind, job.mutating ? 1 : 0, job.state,
+        job.createdAt, job.startedAt, job.finishedAt, job.resultJson, job.errorClass, job.exitCode,
+      );
+      if (inserted.changes !== 1) {
+        this.database.exec('ROLLBACK');
+        return false;
+      }
+      insertJobEvent(this.database, event, 1);
+      this.database.exec('COMMIT');
+      return true;
+    } catch (error) {
+      this.database.exec('ROLLBACK');
+      throw error;
+    }
+  }
+
+  findById(jobId: string): StoredJob | null {
+    return mapJob(this.database.prepare(`
+      SELECT id, target_id, actor_user_id, kind, mutating, state, created_at,
+             started_at, finished_at, result_json, error_class, exit_code
+      FROM jobs WHERE id = ?
+    `).get(jobId));
+  }
+
+  findNonTerminal(): readonly StoredJob[] {
+    return this.database.prepare(`
+      SELECT id, target_id, actor_user_id, kind, mutating, state, created_at,
+             started_at, finished_at, result_json, error_class, exit_code
+      FROM jobs
+      WHERE state IN ('queued', 'running', 'cancelling')
+      ORDER BY created_at, id
+    `).all().map((row) => mapJob(row)!).filter(Boolean);
+  }
+
+  transitionWithEvent(
+    jobId: string,
+    expectedState: JobState,
+    update: JobTransitionUpdate,
+    event: Omit<StoredJobEvent, 'sequence'>,
+  ): boolean {
+    if (event.jobId !== jobId) throw new Error('Transition event must belong to the transitioned job.');
+    this.database.exec('BEGIN IMMEDIATE');
+    try {
+      const changed = this.database.prepare(`
+        UPDATE jobs
+        SET state = ?, started_at = ?, finished_at = ?, result_json = ?, error_class = ?, exit_code = ?
+        WHERE id = ? AND state = ?
+      `).run(
+        update.state, update.startedAt, update.finishedAt, update.resultJson,
+        update.errorClass, update.exitCode, jobId, expectedState,
+      );
+      if (changed.changes !== 1) {
+        this.database.exec('ROLLBACK');
+        return false;
+      }
+      insertJobEvent(this.database, event, nextJobEventSequence(this.database, jobId));
+      this.database.exec('COMMIT');
+      return true;
+    } catch (error) {
+      this.database.exec('ROLLBACK');
+      throw error;
+    }
+  }
+
+  appendEvent(event: Omit<StoredJobEvent, 'sequence'>): StoredJobEvent {
+    this.database.exec('BEGIN IMMEDIATE');
+    try {
+      const stored = insertJobEvent(this.database, event, nextJobEventSequence(this.database, event.jobId));
+      this.database.exec('COMMIT');
+      return stored;
+    } catch (error) {
+      this.database.exec('ROLLBACK');
+      throw error;
+    }
+  }
+
+  listEvents(jobId: string): readonly StoredJobEvent[] {
+    return this.database.prepare(`
+      SELECT id, job_id, sequence, event_type, payload_json, created_at
+      FROM job_events WHERE job_id = ? ORDER BY sequence
+    `).all(jobId).map(mapJobEvent);
+  }
+}
+
+export class SqliteAuditRepository implements AuditRepository {
+  constructor(private readonly database: DatabaseConnection) {}
+
+  append(event: StoredAuditEvent): void {
+    this.database.prepare(`
+      INSERT INTO audit_events(
+        id, timestamp, actor_user_id, host_id, target_id, action,
+        parameters_redacted_json, result, exit_code, error_class, job_id
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(
+      event.id, event.timestamp, event.actorUserId, event.hostId, event.targetId,
+      event.action, event.parametersRedactedJson, event.result, event.exitCode,
+      event.errorClass, event.jobId,
+    );
+  }
+
+  listByTarget(targetId: string): readonly StoredAuditEvent[] {
+    return this.database.prepare(`
+      SELECT id, timestamp, actor_user_id, host_id, target_id, action,
+             parameters_redacted_json, result, exit_code, error_class, job_id
+      FROM audit_events WHERE target_id = ? ORDER BY timestamp, id
+    `).all(targetId).map(mapAuditEvent);
   }
 }
