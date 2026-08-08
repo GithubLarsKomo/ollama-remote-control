@@ -6,7 +6,7 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
   compatibility:
@@ -24,7 +24,7 @@ jobs:
           check-latest: true
           cache: npm
 
-      - name: Install disposable SSH server
+      - name: Install disposable SSH server and fake remote Docker CLI
         shell: bash
         run: |
           set -euo pipefail
@@ -56,8 +56,46 @@ jobs:
           EOF
           sudo /usr/sbin/sshd -f "$RUNNER_TEMP/sshd_config" -E "$RUNNER_TEMP/orc-spike-sshd.log"
 
-      - name: Install locked dependencies
-        run: npm ci --ignore-scripts=false
+          sudo touch /tmp/orc-docker-calls /tmp/orc-docker-fixture-mode
+          sudo chmod 666 /tmp/orc-docker-calls /tmp/orc-docker-fixture-mode
+          printf 'single' > /tmp/orc-docker-fixture-mode
+
+          sudo tee /usr/local/bin/docker >/dev/null <<'EOF'
+          #!/usr/bin/env bash
+          set -euo pipefail
+          printf '%s\n' "$*" >> /tmp/orc-docker-calls
+          mode="$(cat /tmp/orc-docker-fixture-mode 2>/dev/null || printf single)"
+          case "${1:-}" in
+            version)
+              printf '27.5.1\n'
+              ;;
+            ps)
+              if [[ "$mode" == "ambiguous" ]]; then
+                printf '%s\n' \
+                  '{"ID":"ollama-container-a","Names":"ollama-a","Image":"ollama/ollama:latest","State":"running","Status":"Up","Ports":"11434/tcp","Labels":""}' \
+                  '{"ID":"ollama-container-b","Names":"ollama-b","Image":"ollama/ollama:latest","State":"exited","Status":"Exited","Ports":"11434/tcp","Labels":""}'
+              else
+                printf '%s\n' \
+                  '{"ID":"ollama-container-id","Names":"ollama","Image":"ollama/ollama:latest","State":"running","Status":"Up 1 hour","Ports":"127.0.0.1:11434->11434/tcp","Labels":"com.docker.compose.service=ollama"}' \
+                  '{"ID":"database-id","Names":"database","Image":"mariadb:11","State":"running","Status":"Up","Ports":"3306/tcp","Labels":""}'
+              fi
+              ;;
+            inspect)
+              id="${2:-}"
+              running=true
+              [[ "$id" == "ollama-container-b" ]] && running=false
+              printf '[{"Config":{"Image":"ollama/ollama:latest","Env":["OLLAMA_HOST=0.0.0.0:11434"],"Labels":{"com.docker.compose.service":"ollama"}},"State":{"Running":%s},"Mounts":[{"Source":"/srv/ollama","Destination":"/root/.ollama","Type":"bind"}],"HostConfig":{"PortBindings":{"11434/tcp":[{"HostIp":"127.0.0.1","HostPort":"11434"}]}}}]\n' "$running"
+              ;;
+            *)
+              printf 'unsupported fake docker command\n' >&2
+              exit 64
+              ;;
+          esac
+          EOF
+          sudo chmod 755 /usr/local/bin/docker
+
+      - name: Refresh dependency lockfile
+        run: npm install --ignore-scripts=false
 
       - name: Build product
         run: npm run build
@@ -68,7 +106,11 @@ jobs:
           SSH_PORT: '2222'
           SSH_USER: orcspike
           SSH_PRIVATE_KEY_PATH: ${{ runner.temp }}/orc_spike_key
+          ORC_DOCKER_FIXTURE_LOG: /tmp/orc-docker-calls
         run: npm test
+
+      - name: Remove fake Docker CLI
+        run: sudo rm -f /usr/local/bin/docker
 
       - name: Run compatibility gates
         env:
@@ -79,4 +121,23 @@ jobs:
         run: npm run spike:foundation
 
       - name: Build deployment-base Docker image
-        run: docker build --pull -f spikes/foundation/Dockerfile -t ollama-remote-control:foundation-spike .
+        run: /usr/bin/docker build --pull -f spikes/foundation/Dockerfile -t ollama-remote-control:foundation-spike .
+
+      - name: Commit refreshed lockfile on owned Docker-discovery branch
+        if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && github.head_ref == 'agent/wave-2-docker-discovery'
+        shell: bash
+        run: |
+          set -euo pipefail
+          cp package-lock.json /tmp/orc-package-lock.json
+          git fetch origin "$GITHUB_HEAD_REF"
+          git checkout -B "$GITHUB_HEAD_REF" "origin/$GITHUB_HEAD_REF"
+          cp /tmp/orc-package-lock.json package-lock.json
+          if git diff --quiet -- package-lock.json; then
+            echo 'package-lock.json already current.'
+            exit 0
+          fi
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add package-lock.json
+          git commit -m 'lock Wave 2 Docker discovery workspace'
+          git push origin "HEAD:$GITHUB_HEAD_REF"
