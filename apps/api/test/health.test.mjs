@@ -23,7 +23,7 @@ test('GET /api/v1/health reports migrated SQLite state', async () => {
       version: '0.0.0',
       database: {
         status: 'ok',
-        schemaVersion: 2,
+        schemaVersion: 3,
       },
     });
     assert.equal(fs.existsSync(databasePath), true);
