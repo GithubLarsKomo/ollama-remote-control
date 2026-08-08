@@ -27,7 +27,7 @@ export interface DockerRegistryCandidate {
   readonly indexDigest: string | null;
   readonly platformDigest: string;
   readonly platform: DockerImagePlatform;
-  readonly version: string | null;
+  readonly imageVersion: string | null;
 }
 
 interface ManifestDescriptor {
@@ -64,7 +64,7 @@ function repositoryFromImageReference(imageReference: string): string {
   return colon > slash ? withoutDigest.slice(0, colon) : withoutDigest;
 }
 
-function candidateVersion(image: Record<string, any>): string | null {
+function candidateImageVersion(image: Record<string, any>): string | null {
   const labels = image.config?.Labels && typeof image.config.Labels === 'object'
     ? image.config.Labels as Record<string, unknown>
     : {};
@@ -136,6 +136,6 @@ export async function inspectDockerRegistryCandidate(
     indexDigest: descriptors ? indexDigest : null,
     platformDigest,
     platform: candidatePlatform,
-    version: candidateVersion(image),
+    imageVersion: candidateImageVersion(image),
   };
 }
