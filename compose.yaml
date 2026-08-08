@@ -1,0 +1,39 @@
+services:
+  app:
+    image: ${ORC_IMAGE:-ollama-remote-control:local}
+    build:
+      context: .
+      dockerfile: Dockerfile
+    init: true
+    restart: unless-stopped
+    user: node
+    read_only: true
+    ports:
+      - "${ORC_BIND_ADDRESS:-127.0.0.1}:${ORC_PORT:-3000}:3000"
+    environment:
+      NODE_ENV: production
+      HOST: 0.0.0.0
+      PORT: "3000"
+      ORC_DATABASE_PATH: /data/ollama-remote-control.sqlite
+      ORC_WEB_DIST_PATH: /app/apps/web/dist
+      ORC_MASTER_KEY_FILE: /run/secrets/orc_master_key
+    volumes:
+      - orc-data:/data
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,nodev,size=64m
+    secrets:
+      - source: orc_master_key
+        target: orc_master_key
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    pids_limit: 256
+    stop_grace_period: 20s
+
+volumes:
+  orc-data:
+
+secrets:
+  orc_master_key:
+    file: ${ORC_MASTER_KEY_SECRET_FILE:-./secrets/orc_master_key}

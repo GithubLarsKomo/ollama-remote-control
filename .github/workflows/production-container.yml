@@ -1,0 +1,135 @@
+name: production-container
+
+on:
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  production-container:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+
+      - name: Build production image
+        run: docker build --pull -t ollama-remote-control:ci .
+
+      - name: Verify runtime image contents and user
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(docker image inspect -f '{{.Config.User}}' ollama-remote-control:ci)" = "node"
+          docker run --rm --entrypoint sh ollama-remote-control:ci -c '
+            set -eu
+            test -f /app/apps/api/dist/production.js
+            test -f /app/apps/web/dist/index.html
+            test -f /app/packages/db/migrations/0001_foundation.sql
+            test ! -e /app/apps/api/src
+            test ! -e /app/apps/api/test
+            test ! -e /app/apps/web/src
+            test ! -e /app/packages/core/src
+          '
+
+      - name: Prepare restricted ephemeral Compose master key
+        shell: bash
+        run: |
+          set -euo pipefail
+          openssl rand 32 | base64 -w0 > "$RUNNER_TEMP/orc_master_key"
+          printf '\n' >> "$RUNNER_TEMP/orc_master_key"
+          sudo chown 1000:1000 "$RUNNER_TEMP/orc_master_key"
+          sudo chmod 0400 "$RUNNER_TEMP/orc_master_key"
+          test "$(stat -c '%u:%g:%a' "$RUNNER_TEMP/orc_master_key")" = "1000:1000:400"
+
+      - name: Validate hardened Compose configuration
+        shell: bash
+        env:
+          ORC_IMAGE: ollama-remote-control:ci
+          ORC_MASTER_KEY_SECRET_FILE: ${{ runner.temp }}/orc_master_key
+        run: |
+          set -euo pipefail
+          docker compose config --format json > "$RUNNER_TEMP/compose.json"
+          jq -e '
+            .services.app.read_only == true
+            and (.services.app.cap_drop | index("ALL") != null)
+            and (.services.app.security_opt | index("no-new-privileges:true") != null)
+            and (.services.app.user == "node")
+            and (.services.app.environment.ORC_MASTER_KEY_FILE == "/run/secrets/orc_master_key")
+            and (.services.app.volumes | any(.target == "/data"))
+            and (.services.app.tmpfs | any(startswith("/tmp:")))
+            and (.services.app.ports | any(.host_ip == "127.0.0.1" and .target == 3000 and .published == "3000"))
+          ' "$RUNNER_TEMP/compose.json" >/dev/null
+          ! grep -Fq '/var/run/docker.sock' "$RUNNER_TEMP/compose.json"
+          ! grep -Eq '(^|[^0-9])11434([^0-9]|$)' "$RUNNER_TEMP/compose.json"
+
+      - name: Start hardened Compose deployment
+        shell: bash
+        env:
+          ORC_IMAGE: ollama-remote-control:ci
+          ORC_MASTER_KEY_SECRET_FILE: ${{ runner.temp }}/orc_master_key
+        run: |
+          set -euo pipefail
+          docker compose up -d --no-build
+
+      - name: Verify same-origin SPA and API runtime
+        shell: bash
+        env:
+          ORC_IMAGE: ollama-remote-control:ci
+          ORC_MASTER_KEY_SECRET_FILE: ${{ runner.temp }}/orc_master_key
+        run: |
+          set -euo pipefail
+          container="$(docker compose ps -q app)"
+          test -n "$container"
+
+          ready=0
+          for _ in $(seq 1 30); do
+            if curl --fail --silent --show-error http://127.0.0.1:3000/api/v1/health > "$RUNNER_TEMP/health.json"; then
+              ready=1
+              break
+            fi
+            sleep 1
+          done
+          if [[ "$ready" != 1 ]]; then
+            docker compose logs app
+            exit 1
+          fi
+
+          jq -e '.status == "ok" and .service == "ollama-remote-control-api"' "$RUNNER_TEMP/health.json" >/dev/null
+          curl --fail --silent --show-error http://127.0.0.1:3000/ > "$RUNNER_TEMP/index.html"
+          grep -Fq '<title>Ollama Remote Control</title>' "$RUNNER_TEMP/index.html"
+
+          status="$(curl --silent --output "$RUNNER_TEMP/api-404" --write-out '%{http_code}' http://127.0.0.1:3000/api/v1/not-a-real-route)"
+          test "$status" = 404
+          ! grep -Fq '<!doctype html>' "$RUNNER_TEMP/api-404"
+
+          test "$(docker inspect -f '{{.Config.User}}' "$container")" = "node"
+          docker exec "$container" sh -c '
+            set -eu
+            test "$(id -u)" -ne 0
+            test -r /run/secrets/orc_master_key
+            if touch /app/should-not-write 2>/dev/null; then exit 1; fi
+            touch /data/ci-write
+            rm /data/ci-write
+          '
+          docker port "$container" 3000/tcp | grep -Fxq '127.0.0.1:3000'
+          docker inspect "$container" > "$RUNNER_TEMP/container-inspect.json"
+          ! grep -Fq '/var/run/docker.sock' "$RUNNER_TEMP/container-inspect.json"
+
+      - name: Show container logs on failure
+        if: failure()
+        env:
+          ORC_IMAGE: ollama-remote-control:ci
+          ORC_MASTER_KEY_SECRET_FILE: ${{ runner.temp }}/orc_master_key
+        run: docker compose logs --no-color app || true
+
+      - name: Tear down Compose deployment
+        if: always()
+        env:
+          ORC_IMAGE: ollama-remote-control:ci
+          ORC_MASTER_KEY_SECRET_FILE: ${{ runner.temp }}/orc_master_key
+        run: docker compose down --volumes --remove-orphans || true
