@@ -1,0 +1,349 @@
+.update-panel {
+  margin-top: 1rem;
+  border: 1px solid #46536c;
+  border-radius: 1rem;
+  background: linear-gradient(165deg, rgba(30, 35, 55, 0.98), rgba(20, 25, 42, 0.98));
+  box-shadow: 0 1rem 3rem rgba(0, 0, 0, 0.18);
+  padding: 1.25rem;
+}
+
+.update-heading,
+.update-section-heading,
+.update-action-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.update-heading {
+  align-items: flex-start;
+  padding-bottom: 1rem;
+  border-bottom: 1px solid rgba(71, 85, 105, 0.65);
+}
+
+.update-heading h2 {
+  margin-bottom: 0.45rem;
+}
+
+.update-heading .muted,
+.update-action-row .muted {
+  margin-bottom: 0;
+  max-width: 54rem;
+}
+
+.update-target {
+  flex: none;
+  max-width: 18rem;
+  border: 1px solid #53627c;
+  border-radius: 999px;
+  padding: 0.35rem 0.65rem;
+  color: #cbd5e1;
+  font-size: 0.78rem;
+  font-weight: 750;
+  overflow-wrap: anywhere;
+}
+
+.update-action-row {
+  margin-top: 1rem;
+  border-radius: 0.85rem;
+  background: rgba(15, 23, 42, 0.45);
+  padding: 1rem;
+}
+
+.update-action-row-end {
+  justify-content: flex-end;
+  background: transparent;
+  padding: 0;
+}
+
+.update-primary {
+  width: auto;
+  flex: none;
+}
+
+.danger-button {
+  border: 1px solid #f87171;
+  border-radius: 0.7rem;
+  background: #b91c1c;
+  color: #fff7ed;
+  padding: 0.7rem 1rem;
+  font: inherit;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.danger-button:hover:not(:disabled) {
+  background: #dc2626;
+}
+
+.danger-button:disabled {
+  cursor: not-allowed;
+  opacity: 0.48;
+}
+
+.danger-button:focus-visible {
+  outline: 3px solid var(--focus);
+  outline-offset: 2px;
+}
+
+.update-progress,
+.update-success,
+.update-error {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.9rem;
+  margin-top: 1rem;
+  border-radius: 0.85rem;
+  padding: 1rem;
+}
+
+.update-progress {
+  border: 1px solid #31546f;
+  background: #10273a;
+  color: #d8f3ff;
+}
+
+.update-progress-danger {
+  border-color: #8a4b51;
+  background: #341c24;
+}
+
+.update-progress p,
+.update-success p,
+.update-error p {
+  margin: 0.3rem 0 0;
+}
+
+.update-spinner {
+  width: 1rem;
+  height: 1rem;
+  flex: none;
+  margin-top: 0.15rem;
+  border: 2px solid rgba(226, 232, 240, 0.35);
+  border-top-color: #e2e8f0;
+  border-radius: 50%;
+  animation: update-spin 900ms linear infinite;
+}
+
+@keyframes update-spin {
+  to { transform: rotate(360deg); }
+}
+
+.update-review,
+.update-confirm {
+  display: grid;
+  gap: 1rem;
+  margin-top: 1rem;
+}
+
+.update-section-heading {
+  align-items: flex-start;
+}
+
+.update-section-heading > div:first-child {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.75rem;
+}
+
+.update-section-heading p {
+  margin: 0.2rem 0 0;
+  color: var(--muted);
+  font-size: 0.8rem;
+}
+
+.update-step {
+  width: 1.7rem;
+  height: 1.7rem;
+  display: grid;
+  place-items: center;
+  flex: none;
+  border: 1px solid #4f6989;
+  border-radius: 50%;
+  background: #132840;
+  color: #bae6fd;
+  font-size: 0.76rem;
+  font-weight: 850;
+}
+
+.update-metrics {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 0.75rem;
+  margin: 0;
+}
+
+.update-metrics.compact {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.update-metric {
+  min-width: 0;
+  border: 1px solid rgba(71, 85, 105, 0.58);
+  border-radius: 0.72rem;
+  background: rgba(8, 15, 29, 0.42);
+  padding: 0.72rem;
+}
+
+.update-metric dt {
+  margin-bottom: 0.28rem;
+  color: var(--muted);
+  font-size: 0.68rem;
+  font-weight: 800;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+.update-metric dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+  font-size: 0.86rem;
+}
+
+.update-mono {
+  font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+  color: #c4b5fd;
+}
+
+.update-strategy,
+.update-warning,
+.update-eligibility {
+  display: grid;
+  gap: 0.75rem;
+  border-radius: 0.85rem;
+  padding: 1rem;
+}
+
+.update-strategy > div:first-child,
+.update-eligibility {
+  gap: 0.2rem;
+}
+
+.update-strategy > div:first-child {
+  display: grid;
+}
+
+.update-strategy > div:first-child span,
+.update-eligibility span {
+  color: var(--muted);
+  font-size: 0.86rem;
+}
+
+.update-strategy-ready,
+.update-eligibility-ready {
+  border: 1px solid #2c6745;
+  background: rgba(18, 53, 35, 0.52);
+}
+
+.update-strategy-blocked,
+.update-eligibility-blocked {
+  border: 1px solid #765d2f;
+  background: rgba(64, 51, 23, 0.52);
+}
+
+.update-warning {
+  border: 1px solid #a06d2c;
+  background: #3c2d18;
+  color: #fde68a;
+}
+
+.update-warning p {
+  margin: 0;
+}
+
+.update-warning-strong {
+  border-color: #dc6b6b;
+  background: #431c24;
+  color: #fecaca;
+}
+
+.update-small {
+  color: var(--muted);
+  font-size: 0.78rem;
+  line-height: 1.5;
+}
+
+.update-check {
+  display: flex;
+  grid-template-columns: none;
+  align-items: flex-start;
+  gap: 0.7rem;
+  border: 1px solid #5d4e32;
+  border-radius: 0.8rem;
+  background: rgba(64, 51, 23, 0.35);
+  padding: 0.85rem;
+  color: #e2e8f0;
+  font-weight: 600;
+  line-height: 1.45;
+}
+
+.update-check input {
+  width: auto;
+  flex: none;
+  margin-top: 0.15rem;
+}
+
+.update-confirm-name {
+  max-width: 34rem;
+}
+
+.update-success {
+  display: grid;
+  border: 1px solid #2d6846;
+  background: #123523;
+  color: #dcfce7;
+}
+
+.update-error {
+  display: grid;
+  border: 1px solid #7f3540;
+  background: var(--danger-bg);
+  color: #fecaca;
+}
+
+.update-success .secondary-button,
+.update-error .secondary-button {
+  justify-self: start;
+}
+
+@media (max-width: 1050px) {
+  .update-metrics {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 700px) {
+  .update-heading,
+  .update-action-row,
+  .update-section-heading {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .update-target {
+    max-width: none;
+    align-self: flex-start;
+  }
+
+  .update-action-row-end {
+    flex-direction: column-reverse;
+  }
+
+  .update-action-row-end button,
+  .update-primary,
+  .danger-button {
+    width: 100%;
+  }
+
+  .update-metrics,
+  .update-metrics.compact {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .update-spinner {
+    animation-duration: 2.5s;
+  }
+}
