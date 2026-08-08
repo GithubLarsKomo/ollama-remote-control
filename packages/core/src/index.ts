@@ -93,6 +93,22 @@ export interface HostOnboardingRepository {
   findHostById(hostId: HostId): StoredHost | null;
 }
 
+export interface StoredOllamaTarget {
+  readonly id: OllamaTargetId;
+  readonly hostId: HostId;
+  readonly displayName: string;
+  readonly selectedContainerId: string;
+  readonly containerNameOverride: string | null;
+  readonly enabled: boolean;
+  readonly createdAt: string;
+  readonly updatedAt: string;
+}
+
+export interface OllamaTargetRepository {
+  saveSelection(target: StoredOllamaTarget): void;
+  findByHostId(hostId: HostId): readonly StoredOllamaTarget[];
+}
+
 export interface ApiHealthResponse {
   readonly status: 'ok';
   readonly service: 'ollama-remote-control-api';
