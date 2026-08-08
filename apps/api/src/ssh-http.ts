@@ -118,7 +118,8 @@ export async function httpGetViaPinnedSsh(
     const client = new Client();
     let channel: ClientChannel | null = null;
     let settled = false;
-    let hostKeyMatched = false;
+    let hostKeyObserved = false;
+    let hostKeyMismatch = false;
     const received: Buffer[] = [];
     let receivedBytes = 0;
 
@@ -171,10 +172,11 @@ export async function httpGetViaPinnedSsh(
       });
     });
     client.once('error', () => {
-      finish(new SshHttpError(
-        hostKeyMatched ? 'SSH_CONNECT_FAILED' : 'SSH_HOST_KEY_MISMATCH',
-        hostKeyMatched ? 'SSH connection failed.' : 'SSH host-key verification failed.',
-      ));
+      if (hostKeyObserved && hostKeyMismatch) {
+        finish(new SshHttpError('SSH_HOST_KEY_MISMATCH', 'SSH host-key verification failed.'));
+        return;
+      }
+      finish(new SshHttpError('SSH_CONNECT_FAILED', 'SSH connection failed.'));
     });
     client.once('end', () => {
       if (!settled && !channel) finish(new SshHttpError('SSH_CONNECT_FAILED', 'SSH connection ended before TCP forwarding started.'));
@@ -186,9 +188,9 @@ export async function httpGetViaPinnedSsh(
       privateKey: connection.privateKey,
       readyTimeout: Math.min(timeoutMs, 10_000),
       hostVerifier: (key: Buffer) => {
-        const matched = fingerprintSha256(key) === connection.expectedFingerprint;
-        hostKeyMatched = matched;
-        return matched;
+        hostKeyObserved = true;
+        hostKeyMismatch = fingerprintSha256(key) !== connection.expectedFingerprint;
+        return !hostKeyMismatch;
       },
     });
   });
