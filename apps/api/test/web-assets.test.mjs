@@ -12,14 +12,15 @@ function fixture() {
   const assets = path.join(dist, 'assets');
   fs.mkdirSync(assets, { recursive: true });
   fs.writeFileSync(path.join(dist, 'index.html'), '<!doctype html><title>ORC</title><div id="root"></div>');
-  fs.writeFileSync(path.join(assets, 'index-abc123.js'), 'console.log("orc");');
-  fs.writeFileSync(path.join(assets, 'index-abc123.css'), ':root{color-scheme:dark}');
+  fs.writeFileSync(path.join(assets, 'index-abc12345.js'), 'console.log("orc");');
+  fs.writeFileSync(path.join(assets, 'index-abc12345.css'), ':root{color-scheme:dark}');
+  fs.writeFileSync(path.join(assets, 'runtime.js'), 'console.log("not fingerprinted");');
   fs.writeFileSync(path.join(root, 'outside.txt'), 'OUTSIDE-SECRET');
   fs.symlinkSync(path.join(root, 'outside.txt'), path.join(assets, 'linked.js'));
   return { root, dist };
 }
 
-test('static web adapter serves index and hashed assets with bounded cache/content headers', async () => {
+test('static web adapter serves index and fingerprinted assets with bounded security/cache headers', async () => {
   const { dist } = fixture();
   const app = Fastify({ logger: false });
   registerWebAssets(app, dist);
@@ -29,21 +30,29 @@ test('static web adapter serves index and hashed assets with bounded cache/conte
     assert.match(response.headers['content-type'], /^text\/html/u);
     assert.equal(response.headers['cache-control'], 'no-cache');
     assert.equal(response.headers['x-content-type-options'], 'nosniff');
+    assert.equal(response.headers['x-frame-options'], 'DENY');
+    assert.equal(response.headers['referrer-policy'], 'no-referrer');
+    assert.equal(response.headers['permissions-policy'], 'camera=(), microphone=(), geolocation=()');
     assert.equal(response.body.includes('ORC'), true);
 
     response = await app.inject({ method: 'GET', url: '/index.html' });
     assert.equal(response.statusCode, 200);
     assert.equal(response.headers['cache-control'], 'no-cache');
 
-    response = await app.inject({ method: 'GET', url: '/assets/index-abc123.js' });
+    response = await app.inject({ method: 'GET', url: '/assets/index-abc12345.js' });
     assert.equal(response.statusCode, 200);
     assert.match(response.headers['content-type'], /^text\/javascript/u);
     assert.equal(response.headers['cache-control'], 'public, max-age=31536000, immutable');
     assert.equal(response.headers['x-content-type-options'], 'nosniff');
 
-    response = await app.inject({ method: 'GET', url: '/assets/index-abc123.css' });
+    response = await app.inject({ method: 'GET', url: '/assets/index-abc12345.css' });
     assert.equal(response.statusCode, 200);
     assert.match(response.headers['content-type'], /^text\/css/u);
+    assert.equal(response.headers['cache-control'], 'public, max-age=31536000, immutable');
+
+    response = await app.inject({ method: 'GET', url: '/assets/runtime.js' });
+    assert.equal(response.statusCode, 200);
+    assert.equal(response.headers['cache-control'], 'no-cache');
   } finally {
     await app.close();
   }
@@ -58,7 +67,8 @@ test('static web adapter rejects traversal, symlinks and missing assets without 
       '/assets/%2e%2e%2Foutside.txt',
       '/assets/linked.js',
       '/assets/missing.js',
-      '/assets/subdir%2F..%2Findex-abc123.js',
+      '/assets/subdir%2F..%2Findex-abc12345.js',
+      '/assets/%2e%2e/outside.txt',
     ]) {
       const response = await app.inject({ method: 'GET', url });
       assert.equal(response.statusCode, 404, url);
