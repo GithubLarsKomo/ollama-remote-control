@@ -7,6 +7,7 @@ export const DOCKER_ADAPTER_SCOPE = Object.freeze([
 export type DockerDiscoveryErrorCode = 'DOCKER_UNAVAILABLE' | 'DOCKER_OUTPUT_INVALID' | 'CONTAINER_NOT_FOUND';
 export type DockerLifecycleAction = 'start' | 'stop' | 'restart';
 export type DockerLifecycleErrorCode = 'DOCKER_UNAVAILABLE' | 'CONTAINER_NOT_FOUND' | 'CONTAINER_STATE_UNVERIFIED';
+export type DockerPreflightErrorCode = 'DOCKER_UNAVAILABLE' | 'DOCKER_OUTPUT_INVALID' | 'CONTAINER_NOT_FOUND' | 'OLLAMA_CLI_ERROR';
 
 export class DockerDiscoveryError extends Error {
   constructor(readonly code: DockerDiscoveryErrorCode, message: string, options?: ErrorOptions) {
@@ -21,6 +22,12 @@ export class DockerLifecycleError extends Error {
     message: string,
     options?: ErrorOptions,
   ) {
+    super(message, options);
+  }
+}
+
+export class DockerPreflightError extends Error {
+  constructor(readonly code: DockerPreflightErrorCode, message: string, options?: ErrorOptions) {
     super(message, options);
   }
 }
@@ -76,6 +83,33 @@ export interface DockerDiscoveryResult {
   readonly candidates: readonly DockerContainerCandidate[];
   readonly recommendedContainerId: string | null;
   readonly ambiguous: boolean;
+}
+
+export interface DockerUpdatePreflightMetadata {
+  readonly containerId: string;
+  readonly containerName: string;
+  readonly running: boolean;
+  readonly imageReference: string;
+  readonly imageId: string;
+  readonly repoDigests: readonly string[];
+  readonly restartPolicy: string;
+  readonly mountCount: number;
+  readonly portBindingCount: number;
+  readonly networkNames: readonly string[];
+  readonly gpuDeviceRequestCount: number;
+  readonly ollamaVersion: string | null;
+  readonly compose: {
+    readonly managed: boolean;
+    readonly project: string | null;
+    readonly service: string | null;
+    readonly configFiles: string | null;
+    readonly workingDir: string | null;
+  };
+}
+
+export interface DockerRollbackCapture {
+  readonly metadata: DockerUpdatePreflightMetadata;
+  readonly rawPayloadJson: string;
 }
 
 interface PsRow {
@@ -139,6 +173,17 @@ function parseInspectObject(stdout: string, action: string): Record<string, any>
   return item as Record<string, any>;
 }
 
+function parsePreflightObject(stdout: string, action: string): Record<string, any> {
+  try {
+    const parsed = JSON.parse(stdout);
+    const item = Array.isArray(parsed) ? parsed[0] : null;
+    if (!item || typeof item !== 'object') throw new Error('missing object');
+    return item as Record<string, any>;
+  } catch (error) {
+    throw new DockerPreflightError('DOCKER_OUTPUT_INVALID', `${action} returned invalid JSON.`, { cause: error as Error });
+  }
+}
+
 function mountsFrom(object: Record<string, any>): DockerMount[] {
   return Array.isArray(object.Mounts) ? object.Mounts.map((mount: any) => ({
     source: String(mount?.Source ?? ''),
@@ -197,6 +242,78 @@ export async function inspectDockerContainer(
     mounts: mountsFrom(object),
     portBindings: object.HostConfig?.PortBindings && typeof object.HostConfig.PortBindings === 'object' ? object.HostConfig.PortBindings : {},
     labels: labelsFrom(object),
+  };
+}
+
+export async function captureDockerRollbackState(
+  executor: CommandExecutor,
+  containerId: string,
+): Promise<DockerRollbackCapture> {
+  const containerResult = await executor.exec(['docker', 'inspect', containerId]);
+  if (containerResult.exitCode !== 0) {
+    const detail = `${containerResult.stderr}\n${containerResult.stdout}`;
+    if (/no such (object|container)/iu.test(detail)) {
+      throw new DockerPreflightError('CONTAINER_NOT_FOUND', 'Selected Docker container was not found.');
+    }
+    throw new DockerPreflightError('DOCKER_UNAVAILABLE', 'Docker container inspect failed.');
+  }
+  const container = parsePreflightObject(containerResult.stdout, 'docker inspect');
+  const imageReference = String(container.Config?.Image ?? '');
+  if (!imageReference) throw new DockerPreflightError('DOCKER_OUTPUT_INVALID', 'Container has no configured image reference.');
+
+  const imageResult = await executor.exec(['docker', 'image', 'inspect', imageReference]);
+  if (imageResult.exitCode !== 0) {
+    throw new DockerPreflightError('DOCKER_UNAVAILABLE', 'Docker image inspect failed.');
+  }
+  const image = parsePreflightObject(imageResult.stdout, 'docker image inspect');
+  const running = Boolean(container.State?.Running);
+  let ollamaVersion: string | null = null;
+  if (running) {
+    const versionResult = await executor.exec(['docker', 'exec', containerId, 'ollama', '--version']);
+    if (versionResult.exitCode !== 0) {
+      throw new DockerPreflightError('OLLAMA_CLI_ERROR', 'Ollama version lookup failed.');
+    }
+    ollamaVersion = versionResult.stdout.trim() || null;
+    if (!ollamaVersion) throw new DockerPreflightError('OLLAMA_CLI_ERROR', 'Ollama version lookup returned no version.');
+  }
+
+  const labels = labelsFrom(container);
+  const composeProject = labels['com.docker.compose.project'] ?? null;
+  const composeService = labels['com.docker.compose.service'] ?? null;
+  const composeManaged = Boolean(composeProject && composeService);
+  const portBindings = container.HostConfig?.PortBindings && typeof container.HostConfig.PortBindings === 'object'
+    ? container.HostConfig.PortBindings as Record<string, unknown>
+    : {};
+  const networks = container.NetworkSettings?.Networks && typeof container.NetworkSettings.Networks === 'object'
+    ? container.NetworkSettings.Networks as Record<string, unknown>
+    : {};
+  const deviceRequests = Array.isArray(container.HostConfig?.DeviceRequests) ? container.HostConfig.DeviceRequests : [];
+  const repoDigests = Array.isArray(image.RepoDigests) ? image.RepoDigests.map(String) : [];
+
+  const metadata: DockerUpdatePreflightMetadata = {
+    containerId: String(container.Id ?? containerId),
+    containerName: String(container.Name ?? '').replace(/^\//u, ''),
+    running,
+    imageReference,
+    imageId: String(container.Image ?? image.Id ?? ''),
+    repoDigests,
+    restartPolicy: String(container.HostConfig?.RestartPolicy?.Name ?? ''),
+    mountCount: Array.isArray(container.Mounts) ? container.Mounts.length : 0,
+    portBindingCount: Object.keys(portBindings).length,
+    networkNames: Object.keys(networks).sort(),
+    gpuDeviceRequestCount: deviceRequests.length,
+    ollamaVersion,
+    compose: {
+      managed: composeManaged,
+      project: composeProject,
+      service: composeService,
+      configFiles: labels['com.docker.compose.project.config_files'] ?? null,
+      workingDir: labels['com.docker.compose.project.working_dir'] ?? null,
+    },
+  };
+  return {
+    metadata,
+    rawPayloadJson: JSON.stringify({ schemaVersion: 1, containerInspect: container, imageInspect: image, ollamaVersion }),
   };
 }
 
