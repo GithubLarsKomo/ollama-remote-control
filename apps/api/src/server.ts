@@ -69,11 +69,18 @@ import {
   TargetDiscoveryService,
 } from './targets.js';
 import {
+  parseUpdateExecutionRequest,
+  UpdateExecutionRequestError,
+} from './update-execution.js';
+import {
   UpdateExecutionIntentError,
   UpdateExecutionIntentService,
 } from './update-execution-intent.js';
 import {
   createSshUpdateRemoteFactory,
+  type UpdateRemoteFactory,
+  UpdateOrchestratorError,
+  UpdateOrchestratorService,
 } from './update-orchestrator.js';
 import {
   UpdatePlanError,
@@ -94,6 +101,7 @@ export interface BuildServerOptions {
   readonly now?: () => Date;
   readonly sessionTtlMs?: number;
   readonly environment?: MasterKeyEnvironment;
+  readonly updateRemoteFactory?: UpdateRemoteFactory;
 }
 
 interface CredentialsBody { readonly username?: unknown; readonly password?: unknown; }
@@ -173,6 +181,8 @@ function sendApiError(reply: FastifyReply, error: unknown): FastifyReply {
     || error instanceof UpdatePlanError
     || error instanceof UpdateStrategyError
     || error instanceof UpdateExecutionIntentError
+    || error instanceof UpdateExecutionRequestError
+    || error instanceof UpdateOrchestratorError
   ) {
     return reply.code(error.statusCode).send({ error: { code: error.code, message: error.message } });
   }
@@ -209,6 +219,7 @@ export function buildServer(options: BuildServerOptions = {}): FastifyInstance {
   const targetStatus = new TargetStatusService(hostRepository, credentialRepository, targetRepository, masterKey);
   const targetLogs = new TargetLogService(hostRepository, credentialRepository, targetRepository, masterKey);
   const ollamaHealth = new OllamaHealthService(hostRepository, credentialRepository, targetRepository, masterKey);
+  const updateRemoteFactory = options.updateRemoteFactory ?? createSshUpdateRemoteFactory(ollamaHealth);
   const containerLifecycle = new ContainerLifecycleService(
     hostRepository,
     credentialRepository,
@@ -252,6 +263,18 @@ export function buildServer(options: BuildServerOptions = {}): FastifyInstance {
     updatePlan,
     updateStrategy,
   );
+  const updateOrchestrator = new UpdateOrchestratorService(
+    hostRepository,
+    credentialRepository,
+    targetRepository,
+    targetBindingRepository,
+    snapshotRepository,
+    masterKey,
+    jobService,
+    auditService,
+    updateRemoteFactory,
+    now,
+  );
   const updateReconciliation = new UpdateReconciliationService(
     hostRepository,
     credentialRepository,
@@ -261,7 +284,7 @@ export function buildServer(options: BuildServerOptions = {}): FastifyInstance {
     masterKey,
     jobService,
     auditService,
-    createSshUpdateRemoteFactory(ollamaHealth),
+    updateRemoteFactory,
     now,
   );
   const loginLimiter = new LoginLimiter();
@@ -411,6 +434,19 @@ export function buildServer(options: BuildServerOptions = {}): FastifyInstance {
         session.userId,
       );
       return reply.code(201).send({ intent });
+    } catch (error) { return sendApiError(reply, error); }
+  });
+
+  app.post<{ Params: TargetParams; Body: unknown }>('/api/v1/targets/:targetId/container/update', async (request, reply) => {
+    try {
+      const session = requireAuthenticatedMutation(request);
+      const execution = parseUpdateExecutionRequest(request.body, request.params.targetId);
+      const result = await updateOrchestrator.execute(
+        request.params.targetId,
+        execution.intentId,
+        session.userId,
+      );
+      return reply.send({ update: result });
     } catch (error) { return sendApiError(reply, error); }
   });
 
