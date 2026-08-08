@@ -96,21 +96,22 @@ export class AuthService {
 
     const normalizedUsername = validateUsername(username);
     validatePassword(password);
-    const createdAt = this.now().toISOString();
     const user: StoredUser = {
       id: randomUUID(),
       username: normalizedUsername,
       passwordHash: await argon2.hash(password, ARGON2_OPTIONS),
       role: 'admin',
-      createdAt,
+      createdAt: this.now().toISOString(),
     };
-    this.repository.createAdmin(user);
+
+    if (!this.repository.createAdminIfNoneExists(user)) {
+      throw new AuthError('BOOTSTRAP_COMPLETE', 409, 'Administrator is already configured.');
+    }
     return publicUser(user);
   }
 
   async login(username: string, password: string): Promise<CreatedSession> {
-    const normalizedUsername = username.trim();
-    const user = this.repository.findUserByUsername(normalizedUsername);
+    const user = this.repository.findUserByUsername(username.trim());
 
     if (!user) {
       await argon2.hash('invalid-login-timing-equalizer', ARGON2_OPTIONS);
