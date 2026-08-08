@@ -106,6 +106,17 @@ export class TargetDiscoveryService {
       updatedAt: timestamp,
     };
     this.targets.saveSelection(target);
-    return target;
+
+    const persisted = this.targets
+      .findByHostId(hostId)
+      .find((item) => item.selectedContainerId === candidate.id);
+    if (!persisted) {
+      throw new TargetDiscoveryError(
+        'TARGET_PERSIST_FAILED',
+        500,
+        'Ollama target selection could not be read back after persistence.',
+      );
+    }
+    return persisted;
   }
 }
