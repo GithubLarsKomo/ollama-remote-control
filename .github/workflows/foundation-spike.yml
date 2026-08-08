@@ -58,10 +58,12 @@ jobs:
           EOF
           sudo /usr/sbin/sshd -f "$RUNNER_TEMP/sshd_config" -E "$RUNNER_TEMP/orc-spike-sshd.log"
 
-          sudo touch /tmp/orc-docker-calls /tmp/orc-docker-fixture-mode /tmp/orc-status-fixture-mode /tmp/orc-system-calls
-          sudo chmod 666 /tmp/orc-docker-calls /tmp/orc-docker-fixture-mode /tmp/orc-status-fixture-mode /tmp/orc-system-calls
+          sudo touch /tmp/orc-docker-calls /tmp/orc-docker-fixture-mode /tmp/orc-status-fixture-mode /tmp/orc-system-calls /tmp/orc-log-state /tmp/orc-log-pid
+          sudo chmod 666 /tmp/orc-docker-calls /tmp/orc-docker-fixture-mode /tmp/orc-status-fixture-mode /tmp/orc-system-calls /tmp/orc-log-state /tmp/orc-log-pid
           printf 'single' > /tmp/orc-docker-fixture-mode
           printf 'normal' > /tmp/orc-status-fixture-mode
+          : > /tmp/orc-log-state
+          : > /tmp/orc-log-pid
 
           sudo tee /usr/local/bin/docker >/dev/null <<'EOF'
           #!/usr/bin/env bash
@@ -107,6 +109,19 @@ jobs:
                 printf 'unsupported fake docker exec\n' >&2
                 exit 64
               fi
+              ;;
+            logs)
+              if [[ "${2:-}" != "--follow" || "${3:-}" != "--timestamps" || "${4:-}" != "--tail" || -z "${5:-}" || "${6:-}" != "ollama-container-id" ]]; then
+                printf 'unsupported fake docker logs arguments\n' >&2
+                exit 64
+              fi
+              printf '%s\n' "$$" > /tmp/orc-log-pid
+              cleanup() { printf 'stopped\n' > /tmp/orc-log-state; }
+              trap 'cleanup; exit 0' TERM HUP INT
+              trap cleanup EXIT
+              printf '2026-08-08T08:00:00Z stdout-log-line\n'
+              printf '2026-08-08T08:00:01Z stderr-log-line\n' >&2
+              while true; do sleep 1; done
               ;;
             *)
               printf 'unsupported fake docker command\n' >&2
@@ -157,6 +172,8 @@ jobs:
           SSH_PRIVATE_KEY_PATH: ${{ runner.temp }}/orc_spike_key
           ORC_DOCKER_FIXTURE_LOG: /tmp/orc-docker-calls
           ORC_SYSTEM_FIXTURE_LOG: /tmp/orc-system-calls
+          ORC_LOG_PROCESS_STATE: /tmp/orc-log-state
+          ORC_LOG_PROCESS_PID: /tmp/orc-log-pid
         run: npm test
 
       - name: Remove read-only remote fixtures

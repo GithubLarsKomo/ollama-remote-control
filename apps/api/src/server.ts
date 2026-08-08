@@ -41,6 +41,11 @@ import {
   type HostProbeInput,
 } from './hosts.js';
 import {
+  parseLogTail,
+  TargetLogError,
+  TargetLogService,
+} from './logs.js';
+import {
   TargetStatusError,
   TargetStatusService,
 } from './status.js';
@@ -67,6 +72,7 @@ interface HostCreateBody extends HostProbeBody {
 interface TargetSelectionBody { readonly containerId?: unknown; readonly displayName?: unknown; }
 interface HostParams { readonly hostId: string; }
 interface TargetParams { readonly targetId: string; }
+interface LogQuery { readonly tail?: unknown; }
 interface LoginBucket { failures: number; resetAt: number; }
 
 class LoginLimiter {
@@ -104,7 +110,7 @@ function hostCreateInput(body: HostCreateBody): HostCreateInput {
 }
 function csrfHeader(value: string | string[] | undefined): string | undefined { return Array.isArray(value) ? value[0] : value; }
 function sendApiError(reply: FastifyReply, error: unknown): FastifyReply {
-  if (error instanceof AuthError || error instanceof HostOnboardingError || error instanceof TargetDiscoveryError || error instanceof TargetStatusError) {
+  if (error instanceof AuthError || error instanceof HostOnboardingError || error instanceof TargetDiscoveryError || error instanceof TargetStatusError || error instanceof TargetLogError) {
     return reply.code(error.statusCode).send({ error: { code: error.code, message: error.message } });
   }
   if (error instanceof DockerDiscoveryError) {
@@ -134,6 +140,7 @@ export function buildServer(options: BuildServerOptions = {}): FastifyInstance {
   const hosts = new HostOnboardingService(hostRepository, masterKey, now);
   const targets = new TargetDiscoveryService(hostRepository, credentialRepository, targetRepository, masterKey, now);
   const targetStatus = new TargetStatusService(hostRepository, credentialRepository, targetRepository, masterKey);
+  const targetLogs = new TargetLogService(hostRepository, credentialRepository, targetRepository, masterKey);
   const loginLimiter = new LoginLimiter();
   const app = Fastify({ logger: false });
 
@@ -219,6 +226,53 @@ export function buildServer(options: BuildServerOptions = {}): FastifyInstance {
       requireAuthenticated(request);
       return reply.send(await targetStatus.read(request.params.targetId));
     } catch (error) { return sendApiError(reply, error); }
+  });
+  app.get<{ Params: TargetParams; Querystring: LogQuery }>('/api/v1/targets/:targetId/logs/stream', async (request, reply) => {
+    let remoteStream;
+    let tail: number;
+    try {
+      requireAuthenticated(request);
+      tail = parseLogTail(request.query?.tail);
+      remoteStream = await targetLogs.open(request.params.targetId, tail);
+    } catch (error) {
+      return sendApiError(reply, error);
+    }
+
+    reply.hijack();
+    reply.raw.writeHead(200, {
+      'content-type': 'text/event-stream; charset=utf-8',
+      'cache-control': 'no-cache, no-transform',
+      connection: 'keep-alive',
+      'x-accel-buffering': 'no',
+    });
+    const writeEvent = (event: string, data: unknown) => {
+      if (reply.raw.destroyed || reply.raw.writableEnded) return;
+      reply.raw.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
+    };
+    writeEvent('ready', { tail });
+    remoteStream.onStdout((chunk) => writeEvent('log', { stream: 'stdout', chunk }));
+    remoteStream.onStderr((chunk) => writeEvent('log', { stream: 'stderr', chunk }));
+
+    let completed = false;
+    const disconnect = () => {
+      if (!completed) remoteStream.cancel();
+    };
+    reply.raw.once('close', disconnect);
+    void remoteStream.done.then(
+      (result) => {
+        completed = true;
+        reply.raw.off('close', disconnect);
+        writeEvent('end', { exitCode: result.exitCode, signal: result.signal ?? null, cancelled: result.cancelled });
+        if (!reply.raw.destroyed && !reply.raw.writableEnded) reply.raw.end();
+      },
+      () => {
+        completed = true;
+        reply.raw.off('close', disconnect);
+        writeEvent('error', { code: 'LOG_STREAM_FAILED', message: 'Remote log stream failed.' });
+        if (!reply.raw.destroyed && !reply.raw.writableEnded) reply.raw.end();
+      },
+    );
+    remoteStream.start();
   });
 
   app.addHook('onClose', async () => { database.close(); });

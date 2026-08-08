@@ -6,6 +6,7 @@ export const SSH_ADAPTER_CAPABILITIES = Object.freeze({
   privateKeyAuthentication: true,
   hostKeyVerification: true,
   exec: true,
+  streamingExec: true,
   forwarding: true,
   pty: true,
 });
@@ -41,6 +42,24 @@ export interface SshPrivateKeyConnection extends SshEndpoint {
 export interface SshExecOptions {
   readonly timeoutMs?: number;
   readonly maxOutputBytes?: number;
+}
+
+export interface SshStreamOptions {
+  readonly startupTimeoutMs?: number;
+}
+
+export interface SshStreamCompletion {
+  readonly exitCode: number | null;
+  readonly signal?: string;
+  readonly cancelled: boolean;
+}
+
+export interface SshCommandStream {
+  readonly done: Promise<SshStreamCompletion>;
+  onStdout(listener: (chunk: string) => void): void;
+  onStderr(listener: (chunk: string) => void): void;
+  start(): void;
+  cancel(): void;
 }
 
 interface PinnedClient {
@@ -210,4 +229,101 @@ export async function execPrivateKey(
   } finally {
     client.end();
   }
+}
+
+export async function streamPrivateKey(
+  connection: SshPrivateKeyConnection,
+  argv: readonly string[],
+  options: SshStreamOptions = {},
+): Promise<SshCommandStream> {
+  const pinned = await connectPinned(connection);
+  const client = pinned.client;
+  const command = commandFromArgv(argv);
+  return await new Promise<SshCommandStream>((resolve, reject) => {
+    let started = false;
+    let startupSettled = false;
+    const startupTimer = setTimeout(() => {
+      if (startupSettled) return;
+      startupSettled = true;
+      client.end();
+      reject(new SshTransportError('SSH_EXEC_FAILED', 'Remote streaming command did not start in time.'));
+    }, options.startupTimeoutMs ?? 10_000);
+    startupTimer.unref();
+
+    client.exec(command, (error, stream) => {
+      if (startupSettled) {
+        stream?.close();
+        return;
+      }
+      startupSettled = true;
+      clearTimeout(startupTimer);
+      if (error) {
+        client.end();
+        reject(new SshTransportError('SSH_EXEC_FAILED', 'Remote streaming command could not start.', { cause: error }));
+        return;
+      }
+
+      stream.pause();
+      stream.stderr.pause();
+      const stdoutListeners = new Set<(chunk: string) => void>();
+      const stderrListeners = new Set<(chunk: string) => void>();
+      let exitCode: number | null = null;
+      let signal: string | undefined;
+      let cancelled = false;
+      let completed = false;
+      let resolveDone!: (completion: SshStreamCompletion) => void;
+      let rejectDone!: (error: Error) => void;
+      const done = new Promise<SshStreamCompletion>((resolveCompletion, rejectCompletion) => {
+        resolveDone = resolveCompletion;
+        rejectDone = rejectCompletion;
+      });
+
+      const finish = () => {
+        if (completed) return;
+        completed = true;
+        client.end();
+        resolveDone({ exitCode, signal, cancelled });
+      };
+      const fail = (streamError: Error) => {
+        if (completed) return;
+        completed = true;
+        client.end();
+        rejectDone(new SshTransportError('SSH_EXEC_FAILED', 'Remote streaming command failed.', { cause: streamError }));
+      };
+      stream.on('data', (chunk: Buffer) => {
+        const text = chunk.toString('utf8');
+        for (const listener of stdoutListeners) listener(text);
+      });
+      stream.stderr.on('data', (chunk: Buffer) => {
+        const text = chunk.toString('utf8');
+        for (const listener of stderrListeners) listener(text);
+      });
+      stream.on('exit', (code: number | null, signalName?: string) => {
+        exitCode = code;
+        signal = signalName;
+      });
+      stream.on('error', fail);
+      stream.on('close', finish);
+
+      const handle: SshCommandStream = {
+        done,
+        onStdout(listener) { stdoutListeners.add(listener); },
+        onStderr(listener) { stderrListeners.add(listener); },
+        start() {
+          if (started || completed) return;
+          started = true;
+          stream.stderr.resume();
+          stream.resume();
+        },
+        cancel() {
+          if (completed || cancelled) return;
+          cancelled = true;
+          try { stream.signal('TERM'); } catch { /* best effort */ }
+          try { stream.close(); } catch { stream.end(); }
+          client.end();
+        },
+      };
+      resolve(handle);
+    });
+  });
 }
