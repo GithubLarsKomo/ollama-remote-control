@@ -6,6 +6,7 @@
   "dependencies": {
     "@orc/core": "0.0.0",
     "@orc/db": "0.0.0",
+    "argon2": "0.45.1",
     "fastify": "5.10.0"
   }
 }
