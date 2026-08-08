@@ -67,7 +67,8 @@ jobs:
             /tmp/orc-log-pid \
             /tmp/orc-container-state \
             /tmp/orc-lifecycle-mode \
-            /tmp/orc-registry-mode
+            /tmp/orc-registry-mode \
+            /tmp/orc-compose-mode
           sudo chmod 666 \
             /tmp/orc-docker-calls \
             /tmp/orc-docker-fixture-mode \
@@ -77,12 +78,14 @@ jobs:
             /tmp/orc-log-pid \
             /tmp/orc-container-state \
             /tmp/orc-lifecycle-mode \
-            /tmp/orc-registry-mode
+            /tmp/orc-registry-mode \
+            /tmp/orc-compose-mode
           printf 'single' > /tmp/orc-docker-fixture-mode
           printf 'normal' > /tmp/orc-status-fixture-mode
           printf 'running' > /tmp/orc-container-state
           printf 'normal' > /tmp/orc-lifecycle-mode
           printf 'changed' > /tmp/orc-registry-mode
+          printf 'normal' > /tmp/orc-compose-mode
           : > /tmp/orc-log-state
           : > /tmp/orc-log-pid
 
@@ -94,6 +97,7 @@ jobs:
           status_mode="$(cat /tmp/orc-status-fixture-mode 2>/dev/null || printf normal)"
           lifecycle_mode="$(cat /tmp/orc-lifecycle-mode 2>/dev/null || printf normal)"
           registry_mode="$(cat /tmp/orc-registry-mode 2>/dev/null || printf changed)"
+          compose_mode="$(cat /tmp/orc-compose-mode 2>/dev/null || printf normal)"
           container_state="$(cat /tmp/orc-container-state 2>/dev/null || printf running)"
           case "${1:-}" in
             version)
@@ -139,6 +143,42 @@ jobs:
                 exit 64
               fi
               printf '[{"Id":"sha256:image-current","RepoTags":["ollama/ollama:latest"],"RepoDigests":["ollama/ollama@sha256:current-digest"],"Architecture":"amd64","Os":"linux","Variant":"","Config":{"Env":["IMAGE_DEFAULT=value"]}}]\n'
+              ;;
+            compose)
+              if [[ "$compose_mode" == "unavailable" ]]; then
+                printf 'docker: compose unavailable secret=COMPOSE-SECRET\n' >&2
+                exit 1
+              fi
+              if [[ "${2:-}" == "version" && "${3:-}" == "--short" ]]; then
+                printf '2.40.3\n'
+                exit 0
+              fi
+              if [[ "${2:-}" != "-p" || "${3:-}" != "orc-stack" || "${4:-}" != "--project-directory" || "${5:-}" != "/srv/orc" || "${6:-}" != "-f" || "${7:-}" != "/srv/orc/compose.yml" ]]; then
+                printf 'unexpected compose context\n' >&2
+                exit 64
+              fi
+              if [[ "${8:-}" == "config" && "${9:-}" == "--services" ]]; then
+                if [[ "$compose_mode" == "config-fail" ]]; then
+                  printf 'compose config failed secret=COMPOSE-SECRET\n' >&2
+                  exit 1
+                fi
+                if [[ "$compose_mode" == "service-missing" ]]; then
+                  printf 'database\n'
+                else
+                  printf 'ollama\ndatabase\n'
+                fi
+                exit 0
+              fi
+              if [[ "${8:-}" == "ps" && "${9:-}" == "--all" && "${10:-}" == "-q" && "${11:-}" == "ollama" ]]; then
+                if [[ "$compose_mode" == "mismatch" ]]; then
+                  printf 'different-container-id\n'
+                else
+                  printf 'ollama-container-id\n'
+                fi
+                exit 0
+              fi
+              printf 'unsupported fake compose command\n' >&2
+              exit 64
               ;;
             buildx)
               if [[ "$registry_mode" == "buildx-missing" ]]; then
@@ -289,6 +329,7 @@ jobs:
           ORC_CONTAINER_STATE: /tmp/orc-container-state
           ORC_LIFECYCLE_MODE: /tmp/orc-lifecycle-mode
           ORC_REGISTRY_MODE: /tmp/orc-registry-mode
+          ORC_COMPOSE_MODE: /tmp/orc-compose-mode
         run: npm test
 
       - name: Remove remote fixtures
