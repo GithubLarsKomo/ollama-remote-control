@@ -196,10 +196,16 @@ export class UpdatePlanService {
     if (snapshot.targetId !== target.id) {
       throw new UpdatePlanError('UPDATE_SNAPSHOT_TARGET_MISMATCH', 409, 'Update snapshot does not belong to the requested target.');
     }
-    const payload = parseSnapshotPayload(new UpdateSnapshotCipher(this.masterKey).decrypt(
-      { snapshotId: snapshot.id, targetId: target.id },
-      snapshot.encryptedPayload,
-    ));
+    let serializedPayload: string;
+    try {
+      serializedPayload = new UpdateSnapshotCipher(this.masterKey).decrypt(
+        { snapshotId: snapshot.id, targetId: target.id },
+        snapshot.encryptedPayload,
+      );
+    } catch {
+      throw new UpdatePlanError('UPDATE_SNAPSHOT_INVALID', 409, 'Encrypted update snapshot could not be authenticated or decrypted.');
+    }
+    const payload = parseSnapshotPayload(serializedPayload);
     const snapshotContainerId = String(payload.containerInspect.Id ?? '').trim();
     if (!snapshotContainerId || snapshotContainerId !== target.selectedContainerId) {
       throw new UpdatePlanError('UPDATE_SNAPSHOT_STALE', 409, 'Target container binding has changed since this snapshot was captured.');
@@ -229,10 +235,15 @@ export class UpdatePlanService {
 
     const credential = this.credentials.findByHostId(host.id);
     if (!credential) throw new UpdatePlanError('SSH_CREDENTIAL_NOT_FOUND', 409, 'Host has no SSH credential.');
-    const privateKey = new SecretCipher(this.masterKey).decrypt(
-      { credentialId: credential.id, hostId: host.id },
-      credential.encryptedPrivateKey,
-    );
+    let privateKey: string;
+    try {
+      privateKey = new SecretCipher(this.masterKey).decrypt(
+        { credentialId: credential.id, hostId: host.id },
+        credential.encryptedPrivateKey,
+      );
+    } catch {
+      throw new UpdatePlanError('SSH_CREDENTIAL_INVALID', 409, 'Stored SSH credential could not be decrypted.');
+    }
     return {
       targetId: target.id,
       hostId: host.id,
@@ -302,7 +313,7 @@ export class UpdatePlanService {
         candidateDigest: candidate.platformDigest,
         candidateIndexDigest: candidate.indexDigest,
         platform: source.platform,
-        updateAvailable: candidate.platformDigest !== source.currentDigest,
+        updateAvailable: source.currentDigest !== candidate.platformDigest && source.currentDigest !== candidate.indexDigest,
         currentOllamaVersion: source.currentOllamaVersion,
         candidateOllamaVersion: candidate.version,
         composeManaged: source.composeManaged,
@@ -347,6 +358,7 @@ export class UpdatePlanService {
           imageReference: plan.imageReference,
           currentDigest: plan.currentDigest,
           candidateDigest: plan.candidateDigest,
+          candidateIndexDigest: plan.candidateIndexDigest,
           pinned: plan.pinned,
           updateAvailable: plan.updateAvailable,
           platform: plan.platform,
