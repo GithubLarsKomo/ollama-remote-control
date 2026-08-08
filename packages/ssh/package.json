@@ -1,0 +1,8 @@
+{
+  "name": "@orc/ssh",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": { ".": { "types": "./dist/index.d.ts", "import": "./dist/index.js" } },
+  "dependencies": { "@orc/core": "0.0.0", "ssh2": "1.17.0" }
+}

@@ -1,0 +1,11 @@
+{
+  "name": "@orc/api",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "@orc/core": "0.0.0",
+    "@orc/db": "0.0.0",
+    "fastify": "5.10.0"
+  }
+}
