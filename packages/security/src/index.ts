@@ -35,6 +35,11 @@ export interface SecretContext {
   readonly hostId: string;
 }
 
+export interface UpdateSnapshotContext {
+  readonly snapshotId: string;
+  readonly targetId: string;
+}
+
 export function loadConfiguredMasterKey(
   environment: MasterKeyEnvironment = process.env,
 ): Buffer | null {
@@ -47,79 +52,117 @@ export function loadConfiguredMasterKey(
   return null;
 }
 
-function aad(context: SecretContext, keyVersion: number): Buffer {
+function secretAad(context: SecretContext, keyVersion: number): Buffer {
   return Buffer.from(
     `ollama-remote-control:ssh-credential:${keyVersion}:${context.hostId}:${context.credentialId}`,
     'utf8',
   );
 }
 
-function validateContext(context: SecretContext): void {
+function snapshotAad(context: UpdateSnapshotContext, keyVersion: number): Buffer {
+  return Buffer.from(
+    `ollama-remote-control:update-snapshot:${keyVersion}:${context.targetId}:${context.snapshotId}`,
+    'utf8',
+  );
+}
+
+function validateSecretContext(context: SecretContext): void {
   if (!context.credentialId) throw new Error('Credential ID is required.');
   if (!context.hostId) throw new Error('Host ID is required.');
+}
+
+function validateSnapshotContext(context: UpdateSnapshotContext): void {
+  if (!context.snapshotId) throw new Error('Snapshot ID is required.');
+  if (!context.targetId) throw new Error('Target ID is required.');
+}
+
+function validateMasterKey(masterKey: Buffer, keyVersion: number): Buffer {
+  if (masterKey.length !== KEY_LENGTH) {
+    throw new MasterKeyError('Master key must contain exactly 32 bytes.');
+  }
+  if (!Number.isInteger(keyVersion) || keyVersion < 1) {
+    throw new MasterKeyError('Key version must be a positive integer.');
+  }
+  return Buffer.from(masterKey);
+}
+
+function encryptAuthenticated(
+  key: Buffer,
+  keyVersion: number,
+  aad: Buffer,
+  plaintext: string,
+): EncryptedSecret {
+  if (!plaintext) throw new Error('Encrypted plaintext must not be empty.');
+  const nonce = randomBytes(NONCE_LENGTH);
+  const cipher = createCipheriv(ALGORITHM, key, nonce, { authTagLength: AUTH_TAG_LENGTH });
+  cipher.setAAD(aad);
+  const ciphertext = Buffer.concat([cipher.update(plaintext, 'utf8'), cipher.final()]);
+  return {
+    algorithm: ALGORITHM,
+    keyVersion,
+    nonce: nonce.toString('base64'),
+    ciphertext: ciphertext.toString('base64'),
+    authTag: cipher.getAuthTag().toString('base64'),
+  };
+}
+
+function decryptAuthenticated(
+  key: Buffer,
+  keyVersion: number,
+  aad: Buffer,
+  encrypted: EncryptedSecret,
+): string {
+  if (encrypted.algorithm !== ALGORITHM) {
+    throw new Error(`Unsupported secret algorithm: ${encrypted.algorithm}`);
+  }
+  if (encrypted.keyVersion !== keyVersion) {
+    throw new Error(`Unsupported secret key version: ${encrypted.keyVersion}`);
+  }
+  const nonce = Buffer.from(encrypted.nonce, 'base64');
+  const ciphertext = Buffer.from(encrypted.ciphertext, 'base64');
+  const authTag = Buffer.from(encrypted.authTag, 'base64');
+  if (nonce.length !== NONCE_LENGTH || authTag.length !== AUTH_TAG_LENGTH) {
+    throw new Error('Encrypted secret metadata is malformed.');
+  }
+  const decipher = createDecipheriv(ALGORITHM, key, nonce, { authTagLength: AUTH_TAG_LENGTH });
+  decipher.setAAD(aad);
+  decipher.setAuthTag(authTag);
+  const plaintext = Buffer.concat([decipher.update(ciphertext), decipher.final()]);
+  return plaintext.toString('utf8');
 }
 
 export class SecretCipher {
   private readonly key: Buffer;
 
   constructor(masterKey: Buffer, private readonly keyVersion = 1) {
-    if (masterKey.length !== KEY_LENGTH) {
-      throw new MasterKeyError('Master key must contain exactly 32 bytes.');
-    }
-    if (!Number.isInteger(keyVersion) || keyVersion < 1) {
-      throw new MasterKeyError('Key version must be a positive integer.');
-    }
-    this.key = Buffer.from(masterKey);
+    this.key = validateMasterKey(masterKey, keyVersion);
   }
 
   encrypt(context: SecretContext, plaintext: string): EncryptedSecret {
-    validateContext(context);
-    if (!plaintext) throw new Error('Secret plaintext must not be empty.');
-
-    const nonce = randomBytes(NONCE_LENGTH);
-    const cipher = createCipheriv(ALGORITHM, this.key, nonce, {
-      authTagLength: AUTH_TAG_LENGTH,
-    });
-    cipher.setAAD(aad(context, this.keyVersion));
-    const ciphertext = Buffer.concat([
-      cipher.update(plaintext, 'utf8'),
-      cipher.final(),
-    ]);
-
-    return {
-      algorithm: ALGORITHM,
-      keyVersion: this.keyVersion,
-      nonce: nonce.toString('base64'),
-      ciphertext: ciphertext.toString('base64'),
-      authTag: cipher.getAuthTag().toString('base64'),
-    };
+    validateSecretContext(context);
+    return encryptAuthenticated(this.key, this.keyVersion, secretAad(context, this.keyVersion), plaintext);
   }
 
   decrypt(context: SecretContext, encrypted: EncryptedSecret): string {
-    validateContext(context);
-    if (encrypted.algorithm !== ALGORITHM) {
-      throw new Error(`Unsupported secret algorithm: ${encrypted.algorithm}`);
-    }
-    if (encrypted.keyVersion !== this.keyVersion) {
-      throw new Error(`Unsupported secret key version: ${encrypted.keyVersion}`);
-    }
+    validateSecretContext(context);
+    return decryptAuthenticated(this.key, this.keyVersion, secretAad(context, encrypted.keyVersion), encrypted);
+  }
+}
 
-    const nonce = Buffer.from(encrypted.nonce, 'base64');
-    const ciphertext = Buffer.from(encrypted.ciphertext, 'base64');
-    const authTag = Buffer.from(encrypted.authTag, 'base64');
-    if (nonce.length !== NONCE_LENGTH || authTag.length !== AUTH_TAG_LENGTH) {
-      throw new Error('Encrypted secret metadata is malformed.');
-    }
+export class UpdateSnapshotCipher {
+  private readonly key: Buffer;
 
-    const decipher = createDecipheriv(ALGORITHM, this.key, nonce, {
-      authTagLength: AUTH_TAG_LENGTH,
-    });
-    decipher.setAAD(aad(context, encrypted.keyVersion));
-    decipher.setAuthTag(authTag);
-    const plaintext = Buffer.concat([
-      decipher.update(ciphertext),
-      decipher.final(),
-    ]);
-    return plaintext.toString('utf8');
+  constructor(masterKey: Buffer, private readonly keyVersion = 1) {
+    this.key = validateMasterKey(masterKey, keyVersion);
+  }
+
+  encrypt(context: UpdateSnapshotContext, plaintext: string): EncryptedSecret {
+    validateSnapshotContext(context);
+    return encryptAuthenticated(this.key, this.keyVersion, snapshotAad(context, this.keyVersion), plaintext);
+  }
+
+  decrypt(context: UpdateSnapshotContext, encrypted: EncryptedSecret): string {
+    validateSnapshotContext(context);
+    return decryptAuthenticated(this.key, this.keyVersion, snapshotAad(context, encrypted.keyVersion), encrypted);
   }
 }
