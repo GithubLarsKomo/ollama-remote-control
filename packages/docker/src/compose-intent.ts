@@ -40,12 +40,23 @@ function canonicalRepository(repository: string): string {
   return `${registry}/${remainder.join('/')}`;
 }
 
+function validDigest(value: string): boolean {
+  const normalized = value.trim().toLowerCase();
+  const separator = normalized.indexOf(':');
+  if (separator < 1) return false;
+  const algorithm = normalized.slice(0, separator);
+  const encoded = normalized.slice(separator + 1);
+  if (!/^[a-z0-9]+(?:[+._-][a-z0-9]+)*$/u.test(algorithm)) return false;
+  if (algorithm === 'sha256') return /^[0-9a-f]{64}$/u.test(encoded);
+  return /^[a-z0-9=_-]{16,}$/u.test(encoded);
+}
+
 function digestParts(reference: string): { repository: string; digest: string } | null {
   const separator = reference.lastIndexOf('@');
   if (separator < 1) return null;
   const repository = canonicalRepository(reference.slice(0, separator));
   const digest = reference.slice(separator + 1).trim().toLowerCase();
-  return repository && digest ? { repository, digest } : null;
+  return repository && validDigest(digest) ? { repository, digest } : null;
 }
 
 export function exactDigestImageReference(imageReference: string, digest: string): string {
@@ -54,8 +65,8 @@ export function exactDigestImageReference(imageReference: string, digest: string
     throw new ComposeIntentError('INVALID_IMAGE_REFERENCE', 'Snapshot image reference cannot be converted to an exact repository reference.');
   }
   const normalizedDigest = digest.trim().toLowerCase();
-  if (!/^[a-z0-9]+(?:[+._-][a-z0-9]+)*:[a-z0-9=_-]{16,}$/u.test(normalizedDigest)) {
-    throw new ComposeIntentError('INVALID_IMAGE_DIGEST', 'Registry candidate digest is not a valid OCI-style digest.');
+  if (!validDigest(normalizedDigest)) {
+    throw new ComposeIntentError('INVALID_IMAGE_DIGEST', 'Registry candidate digest is not valid for executable image pinning.');
   }
   return `${repository}@${normalizedDigest}`;
 }
@@ -65,7 +76,7 @@ export function composeDigestOverrideJson(service: string, exactImageReference: 
     throw new ComposeIntentError('COMPOSE_PIN_VALIDATION_FAILED', 'Compose service name is invalid.');
   }
   if (!digestParts(exactImageReference)) {
-    throw new ComposeIntentError('INVALID_IMAGE_REFERENCE', 'Exact image reference must contain a digest.');
+    throw new ComposeIntentError('INVALID_IMAGE_REFERENCE', 'Exact image reference must contain a valid digest.');
   }
   return `${JSON.stringify({ services: { [service]: { image: exactImageReference } } })}\n`;
 }
