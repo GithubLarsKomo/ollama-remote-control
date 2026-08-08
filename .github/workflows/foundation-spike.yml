@@ -24,7 +24,7 @@ jobs:
           check-latest: true
           cache: npm
 
-      - name: Install disposable SSH server and fake remote Docker CLI
+      - name: Install disposable SSH server and read-only remote fixtures
         shell: bash
         run: |
           set -euo pipefail
@@ -58,15 +58,17 @@ jobs:
           EOF
           sudo /usr/sbin/sshd -f "$RUNNER_TEMP/sshd_config" -E "$RUNNER_TEMP/orc-spike-sshd.log"
 
-          sudo touch /tmp/orc-docker-calls /tmp/orc-docker-fixture-mode
-          sudo chmod 666 /tmp/orc-docker-calls /tmp/orc-docker-fixture-mode
+          sudo touch /tmp/orc-docker-calls /tmp/orc-docker-fixture-mode /tmp/orc-status-fixture-mode /tmp/orc-system-calls
+          sudo chmod 666 /tmp/orc-docker-calls /tmp/orc-docker-fixture-mode /tmp/orc-status-fixture-mode /tmp/orc-system-calls
           printf 'single' > /tmp/orc-docker-fixture-mode
+          printf 'normal' > /tmp/orc-status-fixture-mode
 
           sudo tee /usr/local/bin/docker >/dev/null <<'EOF'
           #!/usr/bin/env bash
           set -euo pipefail
           printf '%s\n' "$*" >> /tmp/orc-docker-calls
           mode="$(cat /tmp/orc-docker-fixture-mode 2>/dev/null || printf single)"
+          status_mode="$(cat /tmp/orc-status-fixture-mode 2>/dev/null || printf normal)"
           case "${1:-}" in
             version)
               printf '27.5.1\n'
@@ -84,9 +86,27 @@ jobs:
               ;;
             inspect)
               id="${2:-}"
+              if [[ "$mode" == "missing-selected" && "$id" == "ollama-container-id" ]]; then
+                printf 'Error: No such object: %s\n' "$id" >&2
+                exit 1
+              fi
               running=true
-              [[ "$id" == "ollama-container-b" ]] && running=false
-              printf '[{"Config":{"Image":"ollama/ollama:latest","Env":["OLLAMA_HOST=0.0.0.0:11434"],"Labels":{"com.docker.compose.service":"ollama"}},"State":{"Running":%s},"Mounts":[{"Source":"/srv/ollama","Destination":"/root/.ollama","Type":"bind"}],"HostConfig":{"PortBindings":{"11434/tcp":[{"HostIp":"127.0.0.1","HostPort":"11434"}]}}}]\n' "$running"
+              state_status=running
+              health=healthy
+              [[ "$id" == "ollama-container-b" ]] && running=false && state_status=exited && health=none
+              printf '[{"Id":"%s","Name":"/%s","RestartCount":2,"Config":{"Image":"ollama/ollama:latest","Env":["OLLAMA_HOST=0.0.0.0:11434","OLLAMA_API_KEY=top-secret"],"Labels":{"com.docker.compose.service":"ollama"}},"State":{"Running":%s,"Status":"%s","StartedAt":"2026-08-08T06:00:00.000000000Z","OOMKilled":false,"Health":{"Status":"%s"}},"Mounts":[{"Source":"/srv/ollama","Destination":"/root/.ollama","Type":"bind"}],"HostConfig":{"PortBindings":{"11434/tcp":[{"HostIp":"127.0.0.1","HostPort":"11434"}]}}}]\n' "$id" "${id/ollama-container-id/ollama}" "$running" "$state_status" "$health"
+              ;;
+            exec)
+              if [[ "$status_mode" == "degraded" ]]; then
+                printf 'ollama CLI unavailable\n' >&2
+                exit 1
+              fi
+              if [[ "${3:-}" == "ollama" && "${4:-}" == "--version" ]]; then
+                printf 'ollama version is 0.32.5\n'
+              else
+                printf 'unsupported fake docker exec\n' >&2
+                exit 64
+              fi
               ;;
             *)
               printf 'unsupported fake docker command\n' >&2
@@ -95,6 +115,33 @@ jobs:
           esac
           EOF
           sudo chmod 755 /usr/local/bin/docker
+
+          sudo tee /usr/local/bin/nvidia-smi >/dev/null <<'EOF'
+          #!/usr/bin/env bash
+          set -euo pipefail
+          printf 'nvidia-smi %s\n' "$*" >> /tmp/orc-system-calls
+          mode="$(cat /tmp/orc-status-fixture-mode 2>/dev/null || printf normal)"
+          if [[ "$mode" == "degraded" ]]; then
+            printf 'NVIDIA unavailable\n' >&2
+            exit 1
+          fi
+          printf 'NVIDIA RTX A4000, 555.42, 30, 16384, 8192, 8192, 55\n'
+          EOF
+          sudo chmod 755 /usr/local/bin/nvidia-smi
+
+          sudo tee /usr/local/bin/df >/dev/null <<'EOF'
+          #!/usr/bin/env bash
+          set -euo pipefail
+          printf 'df %s\n' "$*" >> /tmp/orc-system-calls
+          mode="$(cat /tmp/orc-status-fixture-mode 2>/dev/null || printf normal)"
+          if [[ "$mode" == "degraded" ]]; then
+            printf 'permission denied\n' >&2
+            exit 1
+          fi
+          printf 'Filesystem 1024-blocks Used Available Capacity Mounted on\n'
+          printf '/dev/fake 1000000 400000 600000 40%% /srv/ollama\n'
+          EOF
+          sudo chmod 755 /usr/local/bin/df
 
       - name: Install locked dependencies
         run: npm ci --ignore-scripts=false
@@ -109,10 +156,11 @@ jobs:
           SSH_USER: orcspike
           SSH_PRIVATE_KEY_PATH: ${{ runner.temp }}/orc_spike_key
           ORC_DOCKER_FIXTURE_LOG: /tmp/orc-docker-calls
+          ORC_SYSTEM_FIXTURE_LOG: /tmp/orc-system-calls
         run: npm test
 
-      - name: Remove fake Docker CLI
-        run: sudo rm -f /usr/local/bin/docker
+      - name: Remove read-only remote fixtures
+        run: sudo rm -f /usr/local/bin/docker /usr/local/bin/nvidia-smi /usr/local/bin/df
 
       - name: Run compatibility gates
         env:
