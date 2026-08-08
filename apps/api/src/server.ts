@@ -18,6 +18,7 @@ import {
   SqliteSshCredentialRepository,
   SqliteUpdateSnapshotRepository,
 } from '@orc/db';
+import { SqliteTargetContainerBindingRepository } from '@orc/db/target-binding';
 import { DockerDiscoveryError, type DockerLifecycleAction } from '@orc/docker';
 import {
   loadConfiguredMasterKey,
@@ -72,6 +73,9 @@ import {
   UpdateExecutionIntentService,
 } from './update-execution-intent.js';
 import {
+  createSshUpdateRemoteFactory,
+} from './update-orchestrator.js';
+import {
   UpdatePlanError,
   UpdatePlanService,
 } from './update-plan.js';
@@ -79,6 +83,7 @@ import {
   UpdatePreflightError,
   UpdatePreflightService,
 } from './update-preflight.js';
+import { UpdateReconciliationService } from './update-reconciliation.js';
 import {
   UpdateStrategyError,
   UpdateStrategyService,
@@ -195,6 +200,7 @@ export function buildServer(options: BuildServerOptions = {}): FastifyInstance {
   const hostRepository = new SqliteHostOnboardingRepository(database);
   const credentialRepository = new SqliteSshCredentialRepository(database);
   const targetRepository = new SqliteOllamaTargetRepository(database);
+  const targetBindingRepository = new SqliteTargetContainerBindingRepository(database);
   const snapshotRepository = new SqliteUpdateSnapshotRepository(database);
   const jobService = new JobService(new SqliteJobRepository(database), now);
   const auditService = new AuditService(new SqliteAuditRepository(database), now);
@@ -246,8 +252,24 @@ export function buildServer(options: BuildServerOptions = {}): FastifyInstance {
     updatePlan,
     updateStrategy,
   );
+  const updateReconciliation = new UpdateReconciliationService(
+    hostRepository,
+    credentialRepository,
+    targetRepository,
+    targetBindingRepository,
+    snapshotRepository,
+    masterKey,
+    jobService,
+    auditService,
+    createSshUpdateRemoteFactory(ollamaHealth),
+    now,
+  );
   const loginLimiter = new LoginLimiter();
   const app = Fastify({ logger: false });
+
+  app.addHook('onReady', async () => {
+    await updateReconciliation.reconcile();
+  });
 
   function requireAuthenticated(request: FastifyRequest): StoredSession {
     const session = auth.getSession(parseCookies(request.headers.cookie)[SESSION_COOKIE]);

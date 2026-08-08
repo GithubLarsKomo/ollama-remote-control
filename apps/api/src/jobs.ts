@@ -8,7 +8,7 @@ import type {
 
 const TERMINAL_STATES = new Set<JobState>(['succeeded', 'failed', 'cancelled']);
 const TRANSITIONS: Readonly<Record<JobState, readonly JobState[]>> = {
-  queued: ['running', 'cancelled'],
+  queued: ['running', 'failed', 'cancelled'],
   running: ['succeeded', 'failed', 'cancelling'],
   cancelling: ['cancelled', 'failed'],
   succeeded: [],
