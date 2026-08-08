@@ -48,7 +48,7 @@ export interface StoredSession {
 
 export interface AuthRepository {
   countUsers(): number;
-  createAdmin(user: StoredUser): void;
+  createAdminIfNoneExists(user: StoredUser): boolean;
   findUserByUsername(username: string): StoredUser | null;
   createSession(session: Omit<StoredSession, 'username' | 'role' | 'revokedAt'>): void;
   findActiveSessionByTokenHash(tokenHash: string, nowIso: string): StoredSession | null;
