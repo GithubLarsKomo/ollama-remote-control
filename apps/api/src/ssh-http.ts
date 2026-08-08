@@ -185,7 +185,7 @@ export async function httpGetViaPinnedSsh(
       username: connection.username,
       privateKey: connection.privateKey,
       readyTimeout: Math.min(timeoutMs, 10_000),
-      hostVerifier: (key) => {
+      hostVerifier: (key: Buffer) => {
         const matched = fingerprintSha256(key) === connection.expectedFingerprint;
         hostKeyMatched = matched;
         return matched;
