@@ -49,3 +49,19 @@ test('five failed logins rate-limit the client until the window expires', async 
     await app.close();
   }
 });
+
+test('oversized login credentials are rejected before expensive verification', async () => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'orc-login-bound-'));
+  const app = buildServer({ databasePath: path.join(directory, 'auth.sqlite') });
+  try {
+    const response = await app.inject({
+      method: 'POST',
+      url: '/api/v1/session',
+      payload: { username: 'admin', password: 'x'.repeat(1025) },
+    });
+    assert.equal(response.statusCode, 401);
+    assert.equal(response.json().error.code, 'INVALID_CREDENTIALS');
+  } finally {
+    await app.close();
+  }
+});
