@@ -24,6 +24,31 @@ export class TargetDiscoveryError extends Error {
   }
 }
 
+export function safeDockerDiscoveryError(error: DockerDiscoveryError): TargetDiscoveryError {
+  if (error.code === 'CONTAINER_NOT_FOUND') {
+    return new TargetDiscoveryError(
+      error.code,
+      404,
+      'Docker container was not found during discovery.',
+      { cause: error },
+    );
+  }
+  if (error.code === 'DOCKER_OUTPUT_INVALID') {
+    return new TargetDiscoveryError(
+      error.code,
+      502,
+      'Docker discovery returned invalid data.',
+      { cause: error },
+    );
+  }
+  return new TargetDiscoveryError(
+    error.code,
+    502,
+    'Docker is unavailable on the remote host.',
+    { cause: error },
+  );
+}
+
 export class TargetDiscoveryService {
   constructor(
     private readonly hosts: HostOnboardingRepository,
@@ -72,7 +97,8 @@ export class TargetDiscoveryService {
         exec: (argv) => execPrivateKey(connection, argv, { timeoutMs: 15_000 }),
       });
     } catch (error) {
-      if (error instanceof DockerDiscoveryError || error instanceof SshTransportError) throw error;
+      if (error instanceof DockerDiscoveryError) throw safeDockerDiscoveryError(error);
+      if (error instanceof SshTransportError) throw error;
       throw new TargetDiscoveryError('DOCKER_UNAVAILABLE', 502, 'Docker discovery failed.', { cause: error as Error });
     }
   }
