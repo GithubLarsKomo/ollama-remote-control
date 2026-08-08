@@ -7,7 +7,7 @@ RUN apt-get update \
     && rm -rf /var/lib/apt/lists/*
 
 COPY package.json package-lock.json ./
-RUN npm ci --omit=dev --ignore-scripts=false \
+RUN npm ci --omit=dev --ignore-scripts=false --workspaces=false \
     && npm cache clean --force
 
 FROM node:24-bookworm-slim AS runtime
