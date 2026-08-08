@@ -89,6 +89,15 @@ test('Docker discovery reconnects with stored encrypted credential and persists 
     });
     assert.equal(selected.statusCode, 201);
     assert.equal(selected.json().target.selectedContainerId, 'ollama-container-id');
+    const persistedTargetId = selected.json().target.id;
+
+    const reselected = await app.inject({
+      method: 'POST', url: `/api/v1/hosts/${hostId}/targets`, headers: authHeaders(cookies),
+      payload: { containerId: 'ollama-container-id', displayName: 'Primary Ollama renamed' },
+    });
+    assert.equal(reselected.statusCode, 201);
+    assert.equal(reselected.json().target.id, persistedTargetId);
+    assert.equal(reselected.json().target.displayName, 'Primary Ollama renamed');
 
     const listed = await app.inject({
       method: 'GET', url: `/api/v1/hosts/${hostId}/targets`,
@@ -96,7 +105,8 @@ test('Docker discovery reconnects with stored encrypted credential and persists 
     });
     assert.equal(listed.statusCode, 200);
     assert.equal(listed.json().targets.length, 1);
-    assert.equal(listed.json().targets[0].displayName, 'Primary Ollama');
+    assert.equal(listed.json().targets[0].id, persistedTargetId);
+    assert.equal(listed.json().targets[0].displayName, 'Primary Ollama renamed');
 
     const calls = fs.readFileSync(DOCKER_FIXTURE_LOG, 'utf8').trim().split(/\r?\n/u).filter(Boolean);
     assert(calls.length > 0);
