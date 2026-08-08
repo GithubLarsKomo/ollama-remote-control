@@ -7,7 +7,8 @@
     ".": { "types": "./dist/index.d.ts", "import": "./dist/index.js" },
     "./registry": { "types": "./dist/registry.d.ts", "import": "./dist/registry.js" },
     "./reconstruct": { "types": "./dist/reconstruct.d.ts", "import": "./dist/reconstruct.js" },
-    "./compose-intent": { "types": "./dist/compose-intent.d.ts", "import": "./dist/compose-intent.js" }
+    "./compose-intent": { "types": "./dist/compose-intent.d.ts", "import": "./dist/compose-intent.js" },
+    "./compose-replacement": { "types": "./dist/compose-replacement.d.ts", "import": "./dist/compose-replacement.js" }
   },
   "dependencies": { "@orc/core": "0.0.0" }
 }
