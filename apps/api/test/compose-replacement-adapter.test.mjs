@@ -170,7 +170,8 @@ test('OpenSSH adapter performs exact forward replacement then local-only rollbac
     assert.equal(calls.includes(`docker image pull ${CANDIDATE_REF}`), true);
     assert.equal(calls.some((line) => line === `docker image pull ${ROLLBACK_REF}`), false);
     assert.equal(calls.filter((line) => line.includes(' up -d --no-deps --force-recreate --pull never --no-build ollama')).length, 2);
-    assert.equal(calls.some((line) => / compose .*\b(down|build)\b/u.test(line)), false);
+    const normalizedCalls = calls.map((line) => line.replaceAll('--no-build', '--build-disabled'));
+    assert.equal(normalizedCalls.some((line) => / compose .*\b(down|build)\b/u.test(line)), false);
 
     const stdinLog = await readRemote(conn, REMOTE_STDIN_LOG);
     assert.equal(stdinLog.includes(CANDIDATE_DIGEST), true);
