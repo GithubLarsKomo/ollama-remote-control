@@ -76,6 +76,23 @@ export interface SshCredentialRepository {
   findByHostId(hostId: HostId): StoredSshCredential | null;
 }
 
+export interface StoredHost {
+  readonly id: HostId;
+  readonly displayName: string;
+  readonly hostname: string;
+  readonly port: number;
+  readonly username: string;
+  readonly hostKeyFingerprint: string;
+  readonly enabled: boolean;
+  readonly createdAt: string;
+  readonly updatedAt: string;
+}
+
+export interface HostOnboardingRepository {
+  createHostWithCredential(host: StoredHost, credential: StoredSshCredential): boolean;
+  findHostById(hostId: HostId): StoredHost | null;
+}
+
 export interface ApiHealthResponse {
   readonly status: 'ok';
   readonly service: 'ollama-remote-control-api';
