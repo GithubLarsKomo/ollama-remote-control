@@ -131,17 +131,18 @@ export class UpdateExecutionIntentService {
       mutating: false,
     });
     this.jobs.transition(job.id, 'running');
-    this.audit.record({
-      actorUserId,
-      hostId: source.hostId,
-      targetId: source.targetId,
-      action: 'container.update_execution_intent.requested',
-      parameters: { intentId: job.id, snapshotId, targetId: source.targetId },
-      result: 'requested',
-      jobId: job.id,
-    });
 
     try {
+      this.audit.record({
+        actorUserId,
+        hostId: source.hostId,
+        targetId: source.targetId,
+        action: 'container.update_execution_intent.requested',
+        parameters: { intentId: job.id, snapshotId, targetId: source.targetId },
+        result: 'requested',
+        jobId: job.id,
+      });
+
       const plan = await this.updatePlan.create(source.targetId, snapshotId, actorUserId);
       if (plan.pinned) {
         throw new UpdateExecutionIntentError('SOURCE_IMAGE_PINNED', 409, 'Digest-pinned source image has no tag-based update candidate.');
