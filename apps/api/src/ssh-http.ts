@@ -28,6 +28,8 @@ export interface SshHttpOptions {
   readonly maxResponseBytes?: number;
 }
 
+export type OllamaReadPath = '/api/version' | '/api/tags' | '/api/ps';
+
 function fingerprintSha256(key: Buffer): string {
   return `SHA256:${createHash('sha256').update(key).digest('base64').replace(/=+$/u, '')}`;
 }
@@ -96,7 +98,7 @@ export async function httpGetViaPinnedSsh(
   connection: SshPrivateKeyConnection,
   destinationHost: string,
   destinationPort: number,
-  requestPath: '/api/version',
+  requestPath: OllamaReadPath,
   options: SshHttpOptions = {},
 ): Promise<SshHttpResponse> {
   const timeoutMs = options.timeoutMs ?? 5_000;
