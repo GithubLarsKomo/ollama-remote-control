@@ -19,6 +19,7 @@ import {
   formatTemperature,
   formatTimestamp,
 } from './format.js';
+import LifecyclePanel from './LifecyclePanel.js';
 import OnboardingPanel from './OnboardingPanel.js';
 import UpdatePanel from './UpdatePanel.js';
 
@@ -226,9 +227,11 @@ function Dashboard({ session, onSignedOut }: { readonly session: SessionView; re
   const [catalogBusy, setCatalogBusy] = useState(true);
   const [statusBusy, setStatusBusy] = useState(false);
   const [updateBusy, setUpdateBusy] = useState(false);
+  const [lifecycleBusy, setLifecycleBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [signingOut, setSigningOut] = useState(false);
 
+  const operationBusy = updateBusy || lifecycleBusy;
   const selectedTarget = useMemo(
     () => targets.find((target) => target.id === selectedTargetId) ?? null,
     [selectedTargetId, targets],
@@ -278,6 +281,11 @@ function Dashboard({ session, onSignedOut }: { readonly session: SessionView; re
     }
   }, [onSignedOut]);
 
+  const refreshTarget = useCallback(async (targetId: string) => {
+    await loadCatalog(targetId);
+    await loadStatus(targetId);
+  }, [loadCatalog, loadStatus]);
+
   useEffect(() => { void loadCatalog(); }, [loadCatalog]);
   useEffect(() => { void loadStatus(selectedTargetId); }, [loadStatus, selectedTargetId]);
 
@@ -299,6 +307,10 @@ function Dashboard({ session, onSignedOut }: { readonly session: SessionView; re
     await loadCatalog(target.id);
   }
 
+  const summaryContainerId = status && selectedTarget && status.target.id === selectedTarget.id
+    ? status.target.selectedContainerId
+    : selectedTarget?.selectedContainerId;
+
   return (
     <div className="app-shell">
       <header className="topbar">
@@ -308,7 +320,7 @@ function Dashboard({ session, onSignedOut }: { readonly session: SessionView; re
         </div>
         <div className="user-actions">
           <span>{session.user.username}</span>
-          <button className="secondary-button" disabled={signingOut || updateBusy} onClick={() => void logout()} type="button">
+          <button className="secondary-button" disabled={signingOut || operationBusy} onClick={() => void logout()} type="button">
             {signingOut ? 'Signing out…' : 'Sign out'}
           </button>
         </div>
@@ -326,7 +338,7 @@ function Dashboard({ session, onSignedOut }: { readonly session: SessionView; re
               <label>
                 Target
                 <select
-                  disabled={catalogBusy || updateBusy}
+                  disabled={catalogBusy || operationBusy}
                   onChange={(event) => setSelectedTargetId(event.target.value)}
                   value={selectedTargetId}
                 >
@@ -335,7 +347,7 @@ function Dashboard({ session, onSignedOut }: { readonly session: SessionView; re
               </label>
               <button
                 className="secondary-button"
-                disabled={!selectedTargetId || statusBusy || updateBusy}
+                disabled={!selectedTargetId || statusBusy || operationBusy}
                 onClick={() => void loadStatus(selectedTargetId)}
                 type="button"
               >
@@ -358,7 +370,7 @@ function Dashboard({ session, onSignedOut }: { readonly session: SessionView; re
               <span className="muted">Selected target</span>
               <strong>{selectedTarget.displayName}</strong>
             </div>
-            <code>{selectedTarget.selectedContainerId}</code>
+            <code>{summaryContainerId}</code>
           </section>
         ) : null}
 
@@ -372,13 +384,24 @@ function Dashboard({ session, onSignedOut }: { readonly session: SessionView; re
           </section>
         ) : null}
 
-        {selectedTarget && status ? (
+        {status && status.target.id === selectedTargetId ? (
+          <LifecyclePanel
+            disabled={updateBusy || statusBusy || catalogBusy}
+            key={`${status.target.id}:${status.target.selectedContainerId}`}
+            onBusyChange={setLifecycleBusy}
+            onChanged={() => refreshTarget(status.target.id)}
+            onSignedOut={onSignedOut}
+            status={status}
+          />
+        ) : null}
+
+        {status && status.target.id === selectedTargetId && !lifecycleBusy ? (
           <UpdatePanel
-            key={selectedTarget.id}
+            key={`${status.target.id}:${status.target.selectedContainerId}`}
             onBusyChange={setUpdateBusy}
             onSignedOut={onSignedOut}
-            onUpdated={() => loadStatus(selectedTarget.id)}
-            target={selectedTarget}
+            onUpdated={() => refreshTarget(status.target.id)}
+            target={status.target}
           />
         ) : null}
       </main>
