@@ -18,6 +18,52 @@ export interface SessionView {
   readonly expiresAt: string;
 }
 
+export interface HostKeyObservation {
+  readonly algorithm: string;
+  readonly fingerprint: string;
+}
+
+export interface HostCatalogEntry {
+  readonly id: string;
+  readonly displayName: string;
+  readonly hostname: string;
+  readonly port: number;
+  readonly username: string;
+  readonly hostKeyFingerprint: string;
+}
+
+export interface CreatedHost extends HostCatalogEntry {
+  readonly enabled: boolean;
+  readonly createdAt: string;
+  readonly updatedAt: string;
+  readonly hostKeyAlgorithm: string;
+}
+
+export interface PublicDockerDiscoveryCandidate {
+  readonly id: string;
+  readonly name: string;
+  readonly image: string;
+  readonly state: string;
+  readonly status: string;
+  readonly ports: string;
+  readonly score: number;
+  readonly reasons: readonly string[];
+  readonly inspect: {
+    readonly image: string;
+    readonly running: boolean;
+    readonly mountCount: number;
+    readonly portBindingCount: number;
+    readonly labelCount: number;
+  };
+}
+
+export interface PublicDockerDiscoveryResult {
+  readonly dockerVersion: string;
+  readonly candidates: readonly PublicDockerDiscoveryCandidate[];
+  readonly recommendedContainerId: string | null;
+  readonly ambiguous: boolean;
+}
+
 export interface TargetCatalogEntry {
   readonly id: string;
   readonly hostId: string;
@@ -276,6 +322,10 @@ function targetPath(targetId: string): string {
   return `/api/v1/targets/${encodeURIComponent(targetId)}`;
 }
 
+function hostPath(hostId: string): string {
+  return `/api/v1/hosts/${encodeURIComponent(hostId)}`;
+}
+
 export const api = {
   setupStatus(): Promise<SetupStatus> {
     return requestJson<SetupStatus>('/api/v1/setup/status');
@@ -297,6 +347,45 @@ export const api = {
     return requestJson('/api/v1/session', {
       method: 'DELETE',
       headers: csrfHeader(),
+    });
+  },
+
+  listHosts(): Promise<{ readonly hosts: readonly HostCatalogEntry[] }> {
+    return requestJson('/api/v1/hosts');
+  },
+
+  probeHost(hostname: string, port: number): Promise<HostKeyObservation> {
+    return requestJson('/api/v1/hosts/probe', {
+      method: 'POST',
+      ...mutationJson({ hostname, port }),
+    });
+  },
+
+  createHost(input: {
+    readonly displayName: string;
+    readonly hostname: string;
+    readonly port: number;
+    readonly username: string;
+    readonly confirmedFingerprint: string;
+    readonly privateKey: string;
+  }): Promise<{ readonly host: CreatedHost }> {
+    return requestJson('/api/v1/hosts', {
+      method: 'POST',
+      ...mutationJson(input),
+    });
+  },
+
+  discoverOllama(hostId: string): Promise<PublicDockerDiscoveryResult> {
+    return requestJson(`${hostPath(hostId)}/discover-ollama`, {
+      method: 'POST',
+      headers: csrfHeader(),
+    });
+  },
+
+  selectTarget(hostId: string, containerId: string, displayName: string): Promise<{ readonly target: TargetCatalogEntry }> {
+    return requestJson(`${hostPath(hostId)}/targets`, {
+      method: 'POST',
+      ...mutationJson({ containerId, displayName }),
     });
   },
 
