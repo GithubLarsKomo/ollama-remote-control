@@ -3,10 +3,16 @@
   "version": "0.0.0",
   "private": true,
   "type": "module",
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
   "engines": {
     "node": ">=24 <25"
   },
   "scripts": {
+    "build": "tsc -b packages/core packages/db packages/ssh packages/docker packages/ollama apps/api",
+    "test": "npm run build && node --test apps/api/test/*.test.mjs",
     "spike:foundation": "node spikes/foundation/run.mjs"
   },
   "dependencies": {
@@ -14,5 +20,9 @@
     "fastify": "5.10.0",
     "ssh2": "1.17.0",
     "ws": "8.21.1"
+  },
+  "devDependencies": {
+    "@types/node": "24.13.3",
+    "typescript": "7.0.2"
   }
 }
