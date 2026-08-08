@@ -107,14 +107,17 @@ export interface StoredOllamaTarget {
 
 export interface OllamaTargetRepository {
   saveSelection(target: StoredOllamaTarget): void;
+  findById(targetId: OllamaTargetId): StoredOllamaTarget | null;
+  findByHostId(hostId: HostId): readonly StoredOllamaTarget[];
+}
+
+export interface TargetContainerBindingRepository {
   rebindContainer(
     targetId: OllamaTargetId,
     expectedContainerId: string,
     newContainerId: string,
     updatedAt: string,
   ): boolean;
-  findById(targetId: OllamaTargetId): StoredOllamaTarget | null;
-  findByHostId(hostId: HostId): readonly StoredOllamaTarget[];
 }
 
 export interface StoredJob {
