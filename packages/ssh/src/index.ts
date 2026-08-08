@@ -42,6 +42,8 @@ export interface SshPrivateKeyConnection extends SshEndpoint {
 export interface SshExecOptions {
   readonly timeoutMs?: number;
   readonly maxOutputBytes?: number;
+  readonly stdin?: string;
+  readonly maxInputBytes?: number;
 }
 
 export interface SshStreamOptions {
@@ -183,6 +185,12 @@ export async function execPrivateKey(
   const client = pinned.client;
   const command = commandFromArgv(argv);
   const maxOutputBytes = options.maxOutputBytes ?? 8 * 1024 * 1024;
+  const maxInputBytes = options.maxInputBytes ?? 1024 * 1024;
+  const stdin = options.stdin;
+  if (stdin !== undefined && Buffer.byteLength(stdin, 'utf8') > maxInputBytes) {
+    client.end();
+    throw new SshTransportError('SSH_EXEC_FAILED', 'Remote command input exceeded limit.');
+  }
   try {
     return await new Promise<RemoteExecResult>((resolve, reject) => {
       client.exec(command, (error, stream) => {
@@ -224,6 +232,7 @@ export async function execPrivateKey(
           if (timer) clearTimeout(timer);
           resolve({ stdout: Buffer.concat(stdout).toString('utf8'), stderr: Buffer.concat(stderr).toString('utf8'), exitCode, signal });
         });
+        if (stdin !== undefined) stream.end(stdin);
       });
     });
   } finally {
