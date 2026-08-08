@@ -111,6 +111,15 @@ export interface OllamaTargetRepository {
   findByHostId(hostId: HostId): readonly StoredOllamaTarget[];
 }
 
+export interface TargetContainerBindingRepository {
+  rebindContainer(
+    targetId: OllamaTargetId,
+    expectedContainerId: string,
+    newContainerId: string,
+    updatedAt: string,
+  ): boolean;
+}
+
 export interface StoredJob {
   readonly id: JobId;
   readonly targetId: OllamaTargetId;
