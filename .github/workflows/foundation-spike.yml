@@ -24,7 +24,7 @@ jobs:
           check-latest: true
           cache: npm
 
-      - name: Install disposable SSH server and read-only remote fixtures
+      - name: Install disposable SSH server and remote fixtures
         shell: bash
         run: |
           set -euo pipefail
@@ -58,10 +58,28 @@ jobs:
           EOF
           sudo /usr/sbin/sshd -f "$RUNNER_TEMP/sshd_config" -E "$RUNNER_TEMP/orc-spike-sshd.log"
 
-          sudo touch /tmp/orc-docker-calls /tmp/orc-docker-fixture-mode /tmp/orc-status-fixture-mode /tmp/orc-system-calls /tmp/orc-log-state /tmp/orc-log-pid
-          sudo chmod 666 /tmp/orc-docker-calls /tmp/orc-docker-fixture-mode /tmp/orc-status-fixture-mode /tmp/orc-system-calls /tmp/orc-log-state /tmp/orc-log-pid
+          sudo touch \
+            /tmp/orc-docker-calls \
+            /tmp/orc-docker-fixture-mode \
+            /tmp/orc-status-fixture-mode \
+            /tmp/orc-system-calls \
+            /tmp/orc-log-state \
+            /tmp/orc-log-pid \
+            /tmp/orc-container-state \
+            /tmp/orc-lifecycle-mode
+          sudo chmod 666 \
+            /tmp/orc-docker-calls \
+            /tmp/orc-docker-fixture-mode \
+            /tmp/orc-status-fixture-mode \
+            /tmp/orc-system-calls \
+            /tmp/orc-log-state \
+            /tmp/orc-log-pid \
+            /tmp/orc-container-state \
+            /tmp/orc-lifecycle-mode
           printf 'single' > /tmp/orc-docker-fixture-mode
           printf 'normal' > /tmp/orc-status-fixture-mode
+          printf 'running' > /tmp/orc-container-state
+          printf 'normal' > /tmp/orc-lifecycle-mode
           : > /tmp/orc-log-state
           : > /tmp/orc-log-pid
 
@@ -71,6 +89,8 @@ jobs:
           printf '%s\n' "$*" >> /tmp/orc-docker-calls
           mode="$(cat /tmp/orc-docker-fixture-mode 2>/dev/null || printf single)"
           status_mode="$(cat /tmp/orc-status-fixture-mode 2>/dev/null || printf normal)"
+          lifecycle_mode="$(cat /tmp/orc-lifecycle-mode 2>/dev/null || printf normal)"
+          container_state="$(cat /tmp/orc-container-state 2>/dev/null || printf running)"
           case "${1:-}" in
             version)
               printf '27.5.1\n'
@@ -95,8 +115,43 @@ jobs:
               running=true
               state_status=running
               health=healthy
-              [[ "$id" == "ollama-container-b" ]] && running=false && state_status=exited && health=none
-              printf '[{"Id":"%s","Name":"/%s","RestartCount":2,"Config":{"Image":"ollama/ollama:latest","Env":["OLLAMA_HOST=0.0.0.0:11434","OLLAMA_API_KEY=top-secret"],"Labels":{"com.docker.compose.service":"ollama"}},"State":{"Running":%s,"Status":"%s","StartedAt":"2026-08-08T06:00:00.000000000Z","OOMKilled":false,"Health":{"Status":"%s"}},"Mounts":[{"Source":"/srv/ollama","Destination":"/root/.ollama","Type":"bind"}],"HostConfig":{"PortBindings":{"11434/tcp":[{"HostIp":"127.0.0.1","HostPort":"11434"}]}}}]\n' "$id" "${id/ollama-container-id/ollama}" "$running" "$state_status" "$health"
+              started_at='2026-08-08T09:00:00.000000000Z'
+              if [[ "$id" == "ollama-container-b" ]]; then
+                running=false
+                state_status=exited
+                health=none
+                started_at='2026-08-08T06:00:00.000000000Z'
+              elif [[ "$id" == "ollama-container-id" && "$container_state" == "stopped" ]]; then
+                running=false
+                state_status=exited
+                health=none
+                started_at='2026-08-08T06:00:00.000000000Z'
+              fi
+              printf '[{"Id":"%s","Name":"/%s","RestartCount":2,"Config":{"Image":"ollama/ollama:latest","Env":["OLLAMA_HOST=0.0.0.0:11434","OLLAMA_API_KEY=top-secret"],"Labels":{"com.docker.compose.service":"ollama"}},"State":{"Running":%s,"Status":"%s","StartedAt":"%s","OOMKilled":false,"Health":{"Status":"%s"}},"Mounts":[{"Source":"/srv/ollama","Destination":"/root/.ollama","Type":"bind"}],"HostConfig":{"PortBindings":{"11434/tcp":[{"HostIp":"127.0.0.1","HostPort":"11434"}]}}}]\n' "$id" "${id/ollama-container-id/ollama}" "$running" "$state_status" "$started_at" "$health"
+              ;;
+            start|stop|restart)
+              action="${1:-}"
+              id="${2:-}"
+              if [[ "$id" != "ollama-container-id" ]]; then
+                printf 'Error: No such container: %s\n' "$id" >&2
+                exit 1
+              fi
+              if [[ "$lifecycle_mode" == "command-fail" ]]; then
+                printf 'daemon rejected secret=REMOTE-TOP-SECRET\n' >&2
+                exit 125
+              fi
+              if [[ "$lifecycle_mode" == "slow" ]]; then
+                sleep 1
+              fi
+              case "$action" in
+                start|restart) next_state=running ;;
+                stop) next_state=stopped ;;
+              esac
+              if [[ "$lifecycle_mode" == "verification-fail" ]]; then
+                if [[ "$next_state" == "running" ]]; then next_state=stopped; else next_state=running; fi
+              fi
+              printf '%s' "$next_state" > /tmp/orc-container-state
+              printf '%s\n' "$id"
               ;;
             exec)
               if [[ "$status_mode" == "degraded" ]]; then
@@ -174,9 +229,11 @@ jobs:
           ORC_SYSTEM_FIXTURE_LOG: /tmp/orc-system-calls
           ORC_LOG_PROCESS_STATE: /tmp/orc-log-state
           ORC_LOG_PROCESS_PID: /tmp/orc-log-pid
+          ORC_CONTAINER_STATE: /tmp/orc-container-state
+          ORC_LIFECYCLE_MODE: /tmp/orc-lifecycle-mode
         run: npm test
 
-      - name: Remove read-only remote fixtures
+      - name: Remove remote fixtures
         run: sudo rm -f /usr/local/bin/docker /usr/local/bin/nvidia-smi /usr/local/bin/df
 
       - name: Run compatibility gates
