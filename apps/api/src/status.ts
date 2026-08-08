@@ -64,6 +64,8 @@ export interface ModelStorageCapability {
   readonly errorClass: string | null;
 }
 
+export type PublicDockerContainerStatus = Omit<DockerContainerStatus, 'env'>;
+
 export interface TargetStatusSnapshot {
   readonly target: {
     readonly id: string;
@@ -71,7 +73,7 @@ export interface TargetStatusSnapshot {
     readonly hostId: string;
     readonly selectedContainerId: string;
   };
-  readonly container: DockerContainerStatus;
+  readonly container: PublicDockerContainerStatus;
   readonly ollama: OllamaVersionCapability;
   readonly environment: readonly OllamaEnvironmentValue[];
   readonly gpu: GpuCapability;
@@ -266,6 +268,7 @@ export class TargetStatusService {
       readGpu(connection),
       readModelStorage(connection, container.mounts),
     ]);
+    const { env, ...publicContainer } = container;
     return {
       target: {
         id: target.id,
@@ -273,9 +276,9 @@ export class TargetStatusService {
         hostId: target.hostId,
         selectedContainerId: target.selectedContainerId,
       },
-      container,
+      container: publicContainer,
       ollama,
-      environment: maskOllamaEnvironment(container.env),
+      environment: maskOllamaEnvironment(env),
       gpu,
       modelStorage,
     };
