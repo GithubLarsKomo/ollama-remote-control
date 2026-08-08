@@ -1,7 +1,8 @@
 # ADR-0005 — SSH credential encryption and master-key source
 
-- **State:** proposed
+- **State:** accepted
 - **Date:** 2026-08-08
+- **Accepted:** 2026-08-08
 - **Decision owner/approver:** product owner
 
 ## Question
@@ -38,7 +39,7 @@ How should SSH private keys be encrypted at rest while keeping the encryption ke
 
 **Rejected:** does not provide the required field-level separation of the SSH private key from the SQLite file and does not by itself satisfy the external master-key boundary.
 
-## Proposed decision
+## Decision
 
 Use **Alternative A**.
 
@@ -80,22 +81,22 @@ SQLite stores only encrypted fields and metadata in `ssh_credentials`, with a on
 
 `key_version` is persisted from the first schema version even though online key rotation is deferred. A future rotation workflow must decrypt with the old version and re-encrypt with the new key/version under an explicit migration job.
 
-## Acceptance gate
+## Validation evidence
 
-Before this ADR becomes `accepted`, CI must prove:
+The final GitHub Actions run was read-only, used the committed lockfile with `npm ci`, and passed all gates:
 
-1. identical plaintext encrypted twice produces different nonce/ciphertext;
-2. correct host+credential context round-trips;
-3. modified authentication tag fails;
-4. wrong master key fails;
-5. wrong credential ID fails;
-6. wrong host ID fails;
-7. malformed Base64 or non-32-byte master keys fail closed;
-8. master-key file overrides environment fallback;
-9. migration 3 is idempotent and preserves previous schemas;
-10. persisted SQLite bytes do not contain the SSH private-key plaintext;
-11. an explicitly malformed API master-key configuration fails before normal startup;
-12. all prior authentication, SSH, streaming and Docker gates remain green.
+1. identical plaintext encrypted twice produces different nonce/ciphertext — **passed**;
+2. correct host+credential context round-trips — **passed**;
+3. modified authentication tag fails — **passed**;
+4. wrong master key fails — **passed**;
+5. wrong credential ID fails — **passed**;
+6. wrong host ID fails — **passed**;
+7. malformed Base64 and non-32-byte master keys fail closed — **passed**;
+8. master-key file overrides environment fallback — **passed**;
+9. migration 3 is idempotent and preserves previous schemas — **passed**;
+10. persisted SQLite bytes do not contain SSH private-key plaintext — **passed**;
+11. explicitly malformed API master-key configuration fails before normal startup — **passed**;
+12. all prior authentication, SSH, streaming and Docker gates remain green — **passed**.
 
 ## Rollback / exit path
 
@@ -106,3 +107,4 @@ The database explicitly records `algorithm` and `key_version`. A future AEAD alg
 - `docs/SPEC.md`
 - `SECURITY.md`
 - Issue #5
+- PR #6
