@@ -1,0 +1,184 @@
+export interface ApiErrorPayload {
+  readonly error: {
+    readonly code: string;
+    readonly message: string;
+  };
+}
+
+export interface SetupStatus {
+  readonly requiresAdminBootstrap: boolean;
+}
+
+export interface SessionView {
+  readonly user: {
+    readonly id: string;
+    readonly username: string;
+    readonly role: 'admin';
+  };
+  readonly expiresAt: string;
+}
+
+export interface TargetCatalogEntry {
+  readonly id: string;
+  readonly hostId: string;
+  readonly displayName: string;
+  readonly selectedContainerId: string;
+}
+
+export interface DockerMountView {
+  readonly source: string;
+  readonly destination: string;
+  readonly type: string;
+}
+
+export interface TargetStatusResult {
+  readonly target: TargetCatalogEntry;
+  readonly container: {
+    readonly id: string;
+    readonly name: string;
+    readonly image: string;
+    readonly running: boolean;
+    readonly state: string;
+    readonly status: string;
+    readonly startedAt: string | null;
+    readonly restartCount: number;
+    readonly oomKilled: boolean;
+    readonly mounts: readonly DockerMountView[];
+    readonly portBindings: Readonly<Record<string, unknown>>;
+    readonly labels: Readonly<Record<string, string>>;
+  };
+  readonly ollama: {
+    readonly available: boolean;
+    readonly version: string | null;
+    readonly errorClass: string | null;
+  };
+  readonly environment: readonly {
+    readonly name: string;
+    readonly value: string | null;
+    readonly redacted: boolean;
+  }[];
+  readonly gpu: {
+    readonly available: boolean;
+    readonly devices: readonly {
+      readonly name: string;
+      readonly driverVersion: string;
+      readonly utilizationPercent: number | null;
+      readonly memoryTotalMiB: number | null;
+      readonly memoryUsedMiB: number | null;
+      readonly memoryFreeMiB: number | null;
+      readonly temperatureC: number | null;
+    }[];
+    readonly errorClass: string | null;
+  };
+  readonly modelStorage: {
+    readonly available: boolean;
+    readonly mount: DockerMountView | null;
+    readonly disk: {
+      readonly totalKiB: number;
+      readonly usedKiB: number;
+      readonly availableKiB: number;
+      readonly capacityPercent: number;
+      readonly mountedOn: string;
+    } | null;
+    readonly errorClass: string | null;
+  };
+}
+
+export class ApiError extends Error {
+  constructor(
+    readonly status: number,
+    readonly code: string,
+    message: string,
+  ) {
+    super(message);
+  }
+}
+
+function isApiErrorPayload(value: unknown): value is ApiErrorPayload {
+  if (!value || typeof value !== 'object') return false;
+  const error = (value as { error?: unknown }).error;
+  return Boolean(
+    error
+    && typeof error === 'object'
+    && typeof (error as { code?: unknown }).code === 'string'
+    && typeof (error as { message?: unknown }).message === 'string',
+  );
+}
+
+async function requestJson<T>(path: string, init: RequestInit = {}): Promise<T> {
+  const response = await fetch(path, {
+    ...init,
+    credentials: 'include',
+    headers: {
+      accept: 'application/json',
+      ...init.headers,
+    },
+  });
+  if (response.ok) {
+    if (response.status === 204) return undefined as T;
+    return await response.json() as T;
+  }
+
+  let payload: unknown = null;
+  try { payload = await response.json(); } catch { /* safe generic error below */ }
+  if (isApiErrorPayload(payload)) {
+    throw new ApiError(response.status, payload.error.code, payload.error.message);
+  }
+  throw new ApiError(response.status, 'HTTP_ERROR', `Request failed with HTTP ${response.status}.`);
+}
+
+function jsonBody(value: unknown): Pick<RequestInit, 'body' | 'headers'> {
+  return {
+    body: JSON.stringify(value),
+    headers: { 'content-type': 'application/json' },
+  };
+}
+
+export function csrfTokenFromCookie(cookieHeader: string): string | null {
+  for (const part of cookieHeader.split(';')) {
+    const [rawName, ...rawValue] = part.trim().split('=');
+    if (rawName !== 'orc_csrf') continue;
+    const value = rawValue.join('=');
+    try { return decodeURIComponent(value); } catch { return value; }
+  }
+  return null;
+}
+
+function csrfHeader(): Readonly<Record<string, string>> {
+  const token = csrfTokenFromCookie(document.cookie);
+  if (!token) throw new ApiError(403, 'CSRF_MISSING', 'CSRF token is unavailable. Sign in again.');
+  return { 'x-csrf-token': token };
+}
+
+export const api = {
+  setupStatus(): Promise<SetupStatus> {
+    return requestJson<SetupStatus>('/api/v1/setup/status');
+  },
+
+  bootstrapAdmin(username: string, password: string): Promise<{ readonly user: SessionView['user'] }> {
+    return requestJson('/api/v1/setup/admin', { method: 'POST', ...jsonBody({ username, password }) });
+  },
+
+  login(username: string, password: string): Promise<SessionView> {
+    return requestJson('/api/v1/session', { method: 'POST', ...jsonBody({ username, password }) });
+  },
+
+  session(): Promise<SessionView> {
+    return requestJson('/api/v1/session');
+  },
+
+  logout(): Promise<void> {
+    return requestJson('/api/v1/session', {
+      method: 'DELETE',
+      headers: csrfHeader(),
+    });
+  },
+
+  listTargets(): Promise<{ readonly targets: readonly TargetCatalogEntry[] }> {
+    return requestJson('/api/v1/targets');
+  },
+
+  targetStatus(targetId: string): Promise<TargetStatusResult> {
+    return requestJson(`/api/v1/targets/${encodeURIComponent(targetId)}/status`);
+  },
+};

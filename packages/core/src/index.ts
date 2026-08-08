@@ -111,6 +111,17 @@ export interface OllamaTargetRepository {
   findByHostId(hostId: HostId): readonly StoredOllamaTarget[];
 }
 
+export interface TargetCatalogEntry {
+  readonly id: OllamaTargetId;
+  readonly hostId: HostId;
+  readonly displayName: string;
+  readonly selectedContainerId: string;
+}
+
+export interface TargetCatalogRepository {
+  listEnabled(): readonly TargetCatalogEntry[];
+}
+
 export interface TargetContainerBindingRepository {
   rebindContainer(
     targetId: OllamaTargetId,

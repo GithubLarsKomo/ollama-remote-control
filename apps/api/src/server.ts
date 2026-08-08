@@ -19,6 +19,7 @@ import {
   SqliteUpdateSnapshotRepository,
 } from '@orc/db';
 import { SqliteTargetContainerBindingRepository } from '@orc/db/target-binding';
+import { SqliteTargetCatalogRepository } from '@orc/db/target-catalog';
 import { DockerDiscoveryError, type DockerLifecycleAction } from '@orc/docker';
 import {
   loadConfiguredMasterKey,
@@ -210,6 +211,7 @@ export function buildServer(options: BuildServerOptions = {}): FastifyInstance {
   const hostRepository = new SqliteHostOnboardingRepository(database);
   const credentialRepository = new SqliteSshCredentialRepository(database);
   const targetRepository = new SqliteOllamaTargetRepository(database);
+  const targetCatalogRepository = new SqliteTargetCatalogRepository(database);
   const targetBindingRepository = new SqliteTargetContainerBindingRepository(database);
   const snapshotRepository = new SqliteUpdateSnapshotRepository(database);
   const jobService = new JobService(new SqliteJobRepository(database), now);
@@ -369,6 +371,10 @@ export function buildServer(options: BuildServerOptions = {}): FastifyInstance {
   );
   app.get<{ Params: HostParams }>('/api/v1/hosts/:hostId/targets', async (request, reply) => {
     try { requireAuthenticated(request); return reply.send({ targets: targetRepository.findByHostId(request.params.hostId) }); }
+    catch (error) { return sendApiError(reply, error); }
+  });
+  app.get('/api/v1/targets', async (request, reply) => {
+    try { requireAuthenticated(request); return reply.send({ targets: targetCatalogRepository.listEnabled() }); }
     catch (error) { return sendApiError(reply, error); }
   });
   app.get<{ Params: TargetParams }>('/api/v1/targets/:targetId/status', async (request, reply) => {
