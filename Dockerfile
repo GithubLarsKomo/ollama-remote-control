@@ -52,6 +52,7 @@ COPY --from=build --chown=node:node /app/packages/security/package.json ./packag
 COPY --from=build --chown=node:node /app/packages/security/dist ./packages/security/dist
 COPY --from=build --chown=node:node /app/packages/db/package.json ./packages/db/package.json
 COPY --from=build --chown=node:node /app/packages/db/dist ./packages/db/dist
+COPY --from=build --chown=node:node /app/packages/db/migrations ./packages/db/migrations
 COPY --from=build --chown=node:node /app/packages/ssh/package.json ./packages/ssh/package.json
 COPY --from=build --chown=node:node /app/packages/ssh/dist ./packages/ssh/dist
 COPY --from=build --chown=node:node /app/packages/docker/package.json ./packages/docker/package.json
