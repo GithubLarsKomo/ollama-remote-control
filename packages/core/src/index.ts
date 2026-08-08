@@ -177,6 +177,21 @@ export interface AuditRepository {
   listByTarget(targetId: OllamaTargetId): readonly StoredAuditEvent[];
 }
 
+export interface StoredUpdateSnapshot {
+  readonly id: string;
+  readonly targetId: OllamaTargetId;
+  readonly actorUserId: string;
+  readonly createdAt: string;
+  readonly publicMetadataJson: string;
+  readonly encryptedPayload: EncryptedSecret;
+}
+
+export interface UpdateSnapshotRepository {
+  save(snapshot: StoredUpdateSnapshot): void;
+  findById(snapshotId: string): StoredUpdateSnapshot | null;
+  listByTarget(targetId: OllamaTargetId): readonly StoredUpdateSnapshot[];
+}
+
 export interface ApiHealthResponse {
   readonly status: 'ok';
   readonly service: 'ollama-remote-control-api';
