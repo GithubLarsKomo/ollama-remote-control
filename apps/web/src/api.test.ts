@@ -11,8 +11,13 @@ function jsonResponse(status: number, body: unknown): Response {
   });
 }
 
+function mutationDocument(): void {
+  vi.stubGlobal('document', { cookie: 'other=1; orc_csrf=csrf%2Btoken%3D' });
+}
+
 afterEach(() => {
   globalThis.fetch = originalFetch;
+  vi.unstubAllGlobals();
   vi.restoreAllMocks();
 });
 
@@ -68,6 +73,81 @@ describe('web API client', () => {
       expect(apiError.code).toBe('JOB_CONFLICT');
       expect(apiError.message).toBe('Another mutation is active.');
       expect(apiError.message).not.toContain('REMOTE-SECRET');
+    }
+  });
+
+  it('orchestrates update planning endpoints with encoded server-issued snapshot IDs', async () => {
+    mutationDocument();
+    const fetchMock = vi.fn<FetchCall>(async (input) => {
+      const url = String(input);
+      if (url.endsWith('/update-preflight')) return jsonResponse(201, { snapshot: { id: 'snapshot/one' } });
+      if (url.includes('/update-plan?')) return jsonResponse(200, { plan: { snapshotId: 'snapshot/one' } });
+      if (url.includes('/update-strategy?')) return jsonResponse(200, { snapshotId: 'snapshot/one', strategy: { type: 'compose', executable: true } });
+      return jsonResponse(201, { intent: { intentId: 'intent-one' } });
+    });
+    globalThis.fetch = fetchMock as typeof fetch;
+
+    const preflight = await api.updatePreflight('target/one');
+    await api.updatePlan('target/one', preflight.snapshot.id);
+    await api.updateStrategy('target/one', preflight.snapshot.id);
+    await api.createUpdateExecutionIntent('target/one', preflight.snapshot.id);
+
+    expect(fetchMock).toHaveBeenCalledTimes(4);
+    const calls = fetchMock.mock.calls;
+    expect(calls[0]?.[0]).toBe('/api/v1/targets/target%2Fone/container/update-preflight');
+    expect(calls[0]?.[1]).toMatchObject({ method: 'POST', credentials: 'include' });
+    expect(calls[0]?.[1]?.headers).toMatchObject({ 'x-csrf-token': 'csrf+token=' });
+
+    expect(calls[1]?.[0]).toBe('/api/v1/targets/target%2Fone/container/update-plan?snapshotId=snapshot%2Fone');
+    expect(calls[2]?.[0]).toBe('/api/v1/targets/target%2Fone/container/update-strategy?snapshotId=snapshot%2Fone');
+
+    expect(calls[3]?.[0]).toBe('/api/v1/targets/target%2Fone/container/update-execution-intent');
+    expect(calls[3]?.[1]?.headers).toMatchObject({
+      'content-type': 'application/json',
+      'x-csrf-token': 'csrf+token=',
+    });
+    expect(calls[3]?.[1]?.body).toBe(JSON.stringify({ snapshotId: 'snapshot/one' }));
+  });
+
+  it('executes updates with only intent and structural confirmation authority', async () => {
+    mutationDocument();
+    const fetchMock = vi.fn<FetchCall>(async () => jsonResponse(200, {
+      update: {
+        jobId: 'job-1',
+        outcome: 'updated',
+        intentId: 'intent/one',
+        snapshotId: 'snapshot-1',
+        previousContainerId: 'old-container',
+        containerId: 'new-container',
+        candidateDigest: 'sha256:server-result-only',
+      },
+    }));
+    globalThis.fetch = fetchMock as typeof fetch;
+
+    await api.executeUpdate('target/one', 'intent/one');
+
+    expect(fetchMock).toHaveBeenCalledOnce();
+    const [url, init] = fetchMock.mock.calls[0]!;
+    expect(url).toBe('/api/v1/targets/target%2Fone/container/update');
+    expect(init?.method).toBe('POST');
+    expect(init?.credentials).toBe('include');
+    expect(init?.headers).toMatchObject({
+      'content-type': 'application/json',
+      'x-csrf-token': 'csrf+token=',
+    });
+
+    const body = JSON.parse(String(init?.body)) as Record<string, unknown>;
+    expect(body).toEqual({
+      intentId: 'intent/one',
+      confirmation: {
+        action: 'update',
+        targetId: 'target/one',
+        intentId: 'intent/one',
+      },
+    });
+    const serialized = JSON.stringify(body);
+    for (const forbidden of ['candidateDigest', 'currentDigest', 'imageReference', 'exactCandidateReference', 'containerId', 'composeService', 'workingDirectory']) {
+      expect(serialized).not.toContain(forbidden);
     }
   });
 });
