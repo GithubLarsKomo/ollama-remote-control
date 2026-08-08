@@ -34,11 +34,9 @@ jobs:
 
           sudo useradd -m -s /bin/bash orcspike
           sudo passwd -d orcspike
-
           ssh-keygen -q -t ed25519 -N '' -f "$RUNNER_TEMP/orc_spike_key"
           sudo install -d -m 700 -o orcspike -g orcspike /home/orcspike/.ssh
           sudo install -m 600 -o orcspike -g orcspike "$RUNNER_TEMP/orc_spike_key.pub" /home/orcspike/.ssh/authorized_keys
-
           sudo mkdir -p /run/sshd
           cat > "$RUNNER_TEMP/sshd_config" <<'EOF'
           Port 2222
@@ -56,16 +54,15 @@ jobs:
           Subsystem sftp internal-sftp
           PidFile /tmp/orc-spike-sshd.pid
           EOF
-
           sudo /usr/sbin/sshd -f "$RUNNER_TEMP/sshd_config" -E "$RUNNER_TEMP/orc-spike-sshd.log"
 
       - name: Install locked dependencies
         run: npm ci --ignore-scripts=false
 
-      - name: Build product foundation
+      - name: Build product
         run: npm run build
 
-      - name: Test product foundation
+      - name: Test product
         run: npm test
 
       - name: Run compatibility gates
