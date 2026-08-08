@@ -107,6 +107,12 @@ export interface StoredOllamaTarget {
 
 export interface OllamaTargetRepository {
   saveSelection(target: StoredOllamaTarget): void;
+  rebindContainer(
+    targetId: OllamaTargetId,
+    expectedContainerId: string,
+    newContainerId: string,
+    updatedAt: string,
+  ): boolean;
   findById(targetId: OllamaTargetId): StoredOllamaTarget | null;
   findByHostId(hostId: HostId): readonly StoredOllamaTarget[];
 }
