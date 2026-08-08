@@ -43,20 +43,23 @@ Der Vite-Devserver läuft nur lokal und proxyt `/api` an die lokale Fastify-API.
 
 ## Deployment
 
-Der sichere Standard ist eine Loopback-Bindung des Containers hinter HTTPS-Terminierung:
+Der sichere Standard ist eine Loopback-Bindung des Containers hinter HTTPS-Terminierung. Der Runtime-Container läuft als non-root UID/GID 1000; der file-basierte Master-Key muss deshalb auf dem Host restriktiv für genau diesen UID lesbar vorbereitet werden:
 
 ```bash
 mkdir -p secrets
+tmp="$(mktemp)"
 umask 077
-openssl rand 32 | base64 -w0 > secrets/orc_master_key
-printf '\n' >> secrets/orc_master_key
+openssl rand 32 | base64 -w0 > "$tmp"
+printf '\n' >> "$tmp"
+sudo install -o 1000 -g 1000 -m 0400 "$tmp" secrets/orc_master_key
+rm -f "$tmp"
 
 docker compose build --pull
 docker compose up -d
 curl --fail http://127.0.0.1:3000/api/v1/health
 ```
 
-Port 3000 wird standardmäßig nur an `127.0.0.1` veröffentlicht. Für den Browser ist HTTPS erforderlich, weil Session- und CSRF-Cookies `Secure` sind. Details und Härtungsregeln stehen in [`docs/DEPLOYMENT.md`](docs/DEPLOYMENT.md).
+Port 3000 wird standardmäßig nur an `127.0.0.1` veröffentlicht. Für den Browser ist HTTPS erforderlich, weil Session- und CSRF-Cookies `Secure` sind. Details, alternative Secret-Pfade und Härtungsregeln stehen in [`docs/DEPLOYMENT.md`](docs/DEPLOYMENT.md).
 
 ## Roadmap
 
