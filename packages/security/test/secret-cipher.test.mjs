@@ -11,31 +11,33 @@ import {
 
 const KEY = Buffer.alloc(32, 0x2a);
 const OTHER_KEY = Buffer.alloc(32, 0x11);
+const CONTEXT = { credentialId: 'credential-1', hostId: 'host-1' };
 const PRIVATE_KEY = '-----BEGIN OPENSSH PRIVATE KEY-----\ntest-secret-material\n-----END OPENSSH PRIVATE KEY-----';
 
 test('AES-GCM secret encryption round-trips with a fresh nonce', () => {
   const cipher = new SecretCipher(KEY);
-  const first = cipher.encrypt('credential-1', PRIVATE_KEY);
-  const second = cipher.encrypt('credential-1', PRIVATE_KEY);
+  const first = cipher.encrypt(CONTEXT, PRIVATE_KEY);
+  const second = cipher.encrypt(CONTEXT, PRIVATE_KEY);
 
-  assert.equal(cipher.decrypt('credential-1', first), PRIVATE_KEY);
-  assert.equal(cipher.decrypt('credential-1', second), PRIVATE_KEY);
+  assert.equal(cipher.decrypt(CONTEXT, first), PRIVATE_KEY);
+  assert.equal(cipher.decrypt(CONTEXT, second), PRIVATE_KEY);
   assert.notEqual(first.nonce, second.nonce);
   assert.notEqual(first.ciphertext, second.ciphertext);
   assert.equal(first.algorithm, 'aes-256-gcm');
   assert.equal(first.keyVersion, 1);
 });
 
-test('tampering, wrong credential AAD and wrong key all fail closed', () => {
+test('tampering, row swaps and wrong key all fail closed', () => {
   const cipher = new SecretCipher(KEY);
-  const encrypted = cipher.encrypt('credential-1', PRIVATE_KEY);
+  const encrypted = cipher.encrypt(CONTEXT, PRIVATE_KEY);
 
-  assert.throws(() => cipher.decrypt('credential-2', encrypted));
-  assert.throws(() => new SecretCipher(OTHER_KEY).decrypt('credential-1', encrypted));
+  assert.throws(() => cipher.decrypt({ ...CONTEXT, credentialId: 'credential-2' }, encrypted));
+  assert.throws(() => cipher.decrypt({ ...CONTEXT, hostId: 'host-2' }, encrypted));
+  assert.throws(() => new SecretCipher(OTHER_KEY).decrypt(CONTEXT, encrypted));
 
   const tag = Buffer.from(encrypted.authTag, 'base64');
   tag[0] ^= 0xff;
-  assert.throws(() => cipher.decrypt('credential-1', {
+  assert.throws(() => cipher.decrypt(CONTEXT, {
     ...encrypted,
     authTag: tag.toString('base64'),
   }));
