@@ -3,7 +3,10 @@ import { mkdirSync, readFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import type {
   AuthRepository,
+  EncryptedSecret,
+  SshCredentialRepository,
   StoredSession,
+  StoredSshCredential,
   StoredUser,
   UserRole,
 } from '@orc/core';
@@ -45,6 +48,11 @@ const migrations: readonly Migration[] = [
     version: 2,
     name: 'identity-sessions',
     source: new URL('../migrations/0002_identity_sessions.sql', import.meta.url),
+  },
+  {
+    version: 3,
+    name: 'ssh-credentials',
+    source: new URL('../migrations/0003_ssh_credentials.sql', import.meta.url),
   },
 ];
 
@@ -129,6 +137,29 @@ function mapSession(row: Record<string, unknown> | undefined): StoredSession | n
   };
 }
 
+function mapEncryptedSecret(row: Record<string, unknown>): EncryptedSecret {
+  return {
+    algorithm: String(row.algorithm) as 'aes-256-gcm',
+    keyVersion: Number(row.key_version),
+    nonce: String(row.nonce),
+    ciphertext: String(row.ciphertext),
+    authTag: String(row.auth_tag),
+  };
+}
+
+function mapSshCredential(
+  row: Record<string, unknown> | undefined,
+): StoredSshCredential | null {
+  if (!row) return null;
+  return {
+    id: String(row.id),
+    hostId: String(row.host_id),
+    encryptedPrivateKey: mapEncryptedSecret(row),
+    createdAt: String(row.created_at),
+    updatedAt: String(row.updated_at),
+  };
+}
+
 export class SqliteAuthRepository implements AuthRepository {
   constructor(private readonly database: DatabaseConnection) {}
 
@@ -199,5 +230,53 @@ export class SqliteAuthRepository implements AuthRepository {
     this.database
       .prepare('UPDATE sessions SET revoked_at = ? WHERE id = ? AND revoked_at IS NULL')
       .run(revokedAt, sessionId);
+  }
+}
+
+export class SqliteSshCredentialRepository implements SshCredentialRepository {
+  constructor(private readonly database: DatabaseConnection) {}
+
+  save(credential: StoredSshCredential): void {
+    const encrypted = credential.encryptedPrivateKey;
+    this.database
+      .prepare(`
+        INSERT INTO ssh_credentials(
+          id, host_id, algorithm, key_version, nonce, ciphertext, auth_tag,
+          created_at, updated_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(host_id) DO UPDATE SET
+          id = excluded.id,
+          algorithm = excluded.algorithm,
+          key_version = excluded.key_version,
+          nonce = excluded.nonce,
+          ciphertext = excluded.ciphertext,
+          auth_tag = excluded.auth_tag,
+          updated_at = excluded.updated_at
+      `)
+      .run(
+        credential.id,
+        credential.hostId,
+        encrypted.algorithm,
+        encrypted.keyVersion,
+        encrypted.nonce,
+        encrypted.ciphertext,
+        encrypted.authTag,
+        credential.createdAt,
+        credential.updatedAt,
+      );
+  }
+
+  findByHostId(hostId: string): StoredSshCredential | null {
+    return mapSshCredential(
+      this.database
+        .prepare(`
+          SELECT
+            id, host_id, algorithm, key_version, nonce, ciphertext, auth_tag,
+            created_at, updated_at
+          FROM ssh_credentials
+          WHERE host_id = ?
+        `)
+        .get(hostId),
+    );
   }
 }
