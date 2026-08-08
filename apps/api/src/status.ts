@@ -133,7 +133,7 @@ async function readOllamaVersion(
     const match = output.match(/\b\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?\b/u);
     return {
       available: true,
-      version: match?.[0] ?? output || null,
+      version: match?.[0] ?? (output || null),
       errorClass: null,
     };
   } catch {
