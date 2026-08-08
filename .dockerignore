@@ -1,0 +1,42 @@
+# VCS and editor state
+.git
+.github
+.vscode
+.idea
+.DS_Store
+Thumbs.db
+
+# Dependencies and generated output
+node_modules
+**/node_modules
+**/dist
+build
+coverage
+playwright-report
+test-results
+
+# Local databases and persistent data
+*.sqlite
+*.sqlite3
+*.db
+*.db-wal
+*.db-shm
+data
+/data
+
+# Secrets and local configuration
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.p12
+*.pfx
+secrets
+**/secrets
+
+# Logs and transient files
+*.log
+npm-debug.log*
+.tmp
+tmp
