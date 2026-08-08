@@ -24,7 +24,6 @@ services:
     secrets:
       - source: orc_master_key
         target: orc_master_key
-        mode: 0444
     cap_drop:
       - ALL
     security_opt:
