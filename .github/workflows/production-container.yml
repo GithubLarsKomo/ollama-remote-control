@@ -29,18 +29,22 @@ jobs:
             set -eu
             test -f /app/apps/api/dist/production.js
             test -f /app/apps/web/dist/index.html
+            test -f /app/packages/db/migrations/0001_foundation.sql
             test ! -e /app/apps/api/src
             test ! -e /app/apps/api/test
             test ! -e /app/apps/web/src
             test ! -e /app/packages/core/src
           '
 
-      - name: Prepare ephemeral Compose master key
+      - name: Prepare restricted ephemeral Compose master key
         shell: bash
         run: |
           set -euo pipefail
           openssl rand 32 | base64 -w0 > "$RUNNER_TEMP/orc_master_key"
           printf '\n' >> "$RUNNER_TEMP/orc_master_key"
+          sudo chown 1000:1000 "$RUNNER_TEMP/orc_master_key"
+          sudo chmod 0400 "$RUNNER_TEMP/orc_master_key"
+          test "$(stat -c '%u:%g:%a' "$RUNNER_TEMP/orc_master_key")" = "1000:1000:400"
 
       - name: Validate hardened Compose configuration
         shell: bash
@@ -107,6 +111,7 @@ jobs:
           docker exec "$container" sh -c '
             set -eu
             test "$(id -u)" -ne 0
+            test -r /run/secrets/orc_master_key
             if touch /app/should-not-write 2>/dev/null; then exit 1; fi
             touch /data/ci-write
             rm /data/ci-write
