@@ -25,55 +25,63 @@ export interface TargetCatalogEntry {
   readonly selectedContainerId: string;
 }
 
+export interface DockerMountView {
+  readonly source: string;
+  readonly destination: string;
+  readonly type: string;
+}
+
 export interface TargetStatusResult {
-  readonly targetId: string;
+  readonly target: TargetCatalogEntry;
   readonly container: {
     readonly id: string;
     readonly name: string;
-    readonly imageReference: string;
+    readonly image: string;
     readonly running: boolean;
+    readonly state: string;
     readonly status: string;
-    readonly health: string;
+    readonly startedAt: string | null;
     readonly restartCount: number;
-    readonly startedAt: string;
+    readonly oomKilled: boolean;
+    readonly mounts: readonly DockerMountView[];
+    readonly portBindings: Readonly<Record<string, unknown>>;
+    readonly labels: Readonly<Record<string, string>>;
   };
   readonly ollama: {
-    readonly version: string;
-    readonly environment: Readonly<Record<string, string>>;
+    readonly available: boolean;
+    readonly version: string | null;
+    readonly errorClass: string | null;
   };
-  readonly gpu:
-    | {
-      readonly available: false;
-      readonly errorClass: string;
-    }
-    | {
-      readonly available: true;
-      readonly devices: readonly {
-        readonly index: number;
-        readonly name: string;
-        readonly driverVersion: string;
-        readonly utilizationGpuPercent: number;
-        readonly memoryTotalBytes: number;
-        readonly memoryUsedBytes: number;
-        readonly memoryFreeBytes: number;
-        readonly temperatureC: number;
-      }[];
-    };
-  readonly modelStorage:
-    | {
-      readonly available: false;
-      readonly errorClass: string;
-    }
-    | {
-      readonly available: true;
-      readonly filesystem: string;
-      readonly mountPoint: string;
-      readonly totalBytes: number;
-      readonly usedBytes: number;
-      readonly availableBytes: number;
-      readonly usedPercent: number;
-      readonly modelPath: string;
-    };
+  readonly environment: readonly {
+    readonly name: string;
+    readonly value: string | null;
+    readonly redacted: boolean;
+  }[];
+  readonly gpu: {
+    readonly available: boolean;
+    readonly devices: readonly {
+      readonly name: string;
+      readonly driverVersion: string;
+      readonly utilizationPercent: number | null;
+      readonly memoryTotalMiB: number | null;
+      readonly memoryUsedMiB: number | null;
+      readonly memoryFreeMiB: number | null;
+      readonly temperatureC: number | null;
+    }[];
+    readonly errorClass: string | null;
+  };
+  readonly modelStorage: {
+    readonly available: boolean;
+    readonly mount: DockerMountView | null;
+    readonly disk: {
+      readonly totalKiB: number;
+      readonly usedKiB: number;
+      readonly availableKiB: number;
+      readonly capacityPercent: number;
+      readonly mountedOn: string;
+    } | null;
+    readonly errorClass: string | null;
+  };
 }
 
 export class ApiError extends Error {
