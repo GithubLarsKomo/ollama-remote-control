@@ -142,6 +142,20 @@ async function cleanup(conn) {
   await execPrivateKey(conn, ['rm', '-f', REMOTE_STUB, REMOTE_LOG, REMOTE_STDIN_LOG, REMOTE_CONTAINER, REMOTE_IMAGE_REF, REMOTE_IMAGE_ID], { timeoutMs: 10_000 });
 }
 
+function composeCommandVerb(line) {
+  const tokens = line.trim().split(/\s+/u);
+  if (tokens[0] !== 'docker' || tokens[1] !== 'compose') return null;
+  let index = 2;
+  while (index < tokens.length) {
+    if (tokens[index] === '-p' || tokens[index] === '--project-directory' || tokens[index] === '--env-file' || tokens[index] === '-f') {
+      index += 2;
+      continue;
+    }
+    return tokens[index] ?? null;
+  }
+  return null;
+}
+
 test('OpenSSH adapter performs exact forward replacement then local-only rollback with no rollback pull', { skip: !HAS_FIXTURE }, async () => {
   const conn = await connection();
   await installStub(conn);
@@ -170,8 +184,7 @@ test('OpenSSH adapter performs exact forward replacement then local-only rollbac
     assert.equal(calls.includes(`docker image pull ${CANDIDATE_REF}`), true);
     assert.equal(calls.some((line) => line === `docker image pull ${ROLLBACK_REF}`), false);
     assert.equal(calls.filter((line) => line.includes(' up -d --no-deps --force-recreate --pull never --no-build ollama')).length, 2);
-    const normalizedCalls = calls.map((line) => line.replaceAll('--no-build', '--build-disabled'));
-    assert.equal(normalizedCalls.some((line) => / compose .*\b(down|build)\b/u.test(line)), false);
+    assert.equal(calls.map(composeCommandVerb).some((verb) => verb === 'down' || verb === 'build'), false);
 
     const stdinLog = await readRemote(conn, REMOTE_STDIN_LOG);
     assert.equal(stdinLog.includes(CANDIDATE_DIGEST), true);
