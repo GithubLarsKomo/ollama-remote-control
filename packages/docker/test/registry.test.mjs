@@ -40,7 +40,7 @@ test('registry inspection selects the matching platform digest and validates its
   assert.equal(result.indexDigest, 'sha256:index-digest');
   assert.equal(result.platformDigest, 'sha256:candidate-digest');
   assert.deepEqual(result.platform, PLATFORM);
-  assert.equal(result.version, '0.33.0');
+  assert.equal(result.imageVersion, '0.33.0');
   assert.deepEqual(calls, [
     ['docker', 'buildx', 'version'],
     ['docker', 'buildx', 'imagetools', 'inspect', 'ollama/ollama:latest', '--format', '{{json .Manifest}}'],
