@@ -30,6 +30,11 @@ export interface MasterKeyEnvironment {
   readonly ORC_MASTER_KEY?: string;
 }
 
+export interface SecretContext {
+  readonly credentialId: string;
+  readonly hostId: string;
+}
+
 export function loadConfiguredMasterKey(
   environment: MasterKeyEnvironment = process.env,
 ): Buffer | null {
@@ -42,11 +47,16 @@ export function loadConfiguredMasterKey(
   return null;
 }
 
-function aad(credentialId: string, keyVersion: number): Buffer {
+function aad(context: SecretContext, keyVersion: number): Buffer {
   return Buffer.from(
-    `ollama-remote-control:ssh-credential:${keyVersion}:${credentialId}`,
+    `ollama-remote-control:ssh-credential:${keyVersion}:${context.hostId}:${context.credentialId}`,
     'utf8',
   );
+}
+
+function validateContext(context: SecretContext): void {
+  if (!context.credentialId) throw new Error('Credential ID is required.');
+  if (!context.hostId) throw new Error('Host ID is required.');
 }
 
 export class SecretCipher {
@@ -62,15 +72,15 @@ export class SecretCipher {
     this.key = Buffer.from(masterKey);
   }
 
-  encrypt(credentialId: string, plaintext: string): EncryptedSecret {
-    if (!credentialId) throw new Error('Credential ID is required.');
+  encrypt(context: SecretContext, plaintext: string): EncryptedSecret {
+    validateContext(context);
     if (!plaintext) throw new Error('Secret plaintext must not be empty.');
 
     const nonce = randomBytes(NONCE_LENGTH);
     const cipher = createCipheriv(ALGORITHM, this.key, nonce, {
       authTagLength: AUTH_TAG_LENGTH,
     });
-    cipher.setAAD(aad(credentialId, this.keyVersion));
+    cipher.setAAD(aad(context, this.keyVersion));
     const ciphertext = Buffer.concat([
       cipher.update(plaintext, 'utf8'),
       cipher.final(),
@@ -85,7 +95,8 @@ export class SecretCipher {
     };
   }
 
-  decrypt(credentialId: string, encrypted: EncryptedSecret): string {
+  decrypt(context: SecretContext, encrypted: EncryptedSecret): string {
+    validateContext(context);
     if (encrypted.algorithm !== ALGORITHM) {
       throw new Error(`Unsupported secret algorithm: ${encrypted.algorithm}`);
     }
@@ -103,7 +114,7 @@ export class SecretCipher {
     const decipher = createDecipheriv(ALGORITHM, this.key, nonce, {
       authTagLength: AUTH_TAG_LENGTH,
     });
-    decipher.setAAD(aad(credentialId, encrypted.keyVersion));
+    decipher.setAAD(aad(context, encrypted.keyVersion));
     decipher.setAuthTag(authTag);
     const plaintext = Buffer.concat([
       decipher.update(ciphertext),
