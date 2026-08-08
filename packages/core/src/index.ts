@@ -94,6 +94,19 @@ export interface HostOnboardingRepository {
   findHostById(hostId: HostId): StoredHost | null;
 }
 
+export interface HostCatalogEntry {
+  readonly id: HostId;
+  readonly displayName: string;
+  readonly hostname: string;
+  readonly port: number;
+  readonly username: string;
+  readonly hostKeyFingerprint: string;
+}
+
+export interface HostCatalogRepository {
+  listEnabled(): readonly HostCatalogEntry[];
+}
+
 export interface StoredOllamaTarget {
   readonly id: OllamaTargetId;
   readonly hostId: HostId;
