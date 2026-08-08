@@ -15,9 +15,9 @@ test('migrations are idempotent and preserve host-target ownership', () => {
   const database = openDatabase(databasePath);
 
   try {
-    assert.equal(applyMigrations(database), 4);
-    assert.equal(applyMigrations(database), 4);
-    assert.equal(getSchemaVersion(database), 4);
+    assert.equal(applyMigrations(database), 5);
+    assert.equal(applyMigrations(database), 5);
+    assert.equal(getSchemaVersion(database), 5);
 
     database
       .prepare('INSERT INTO hosts(id, display_name, hostname, port, username) VALUES (?, ?, ?, ?, ?)')
@@ -30,15 +30,22 @@ test('migrations are idempotent and preserve host-target ownership', () => {
     });
 
     database
-      .prepare('INSERT INTO ollama_targets(id, host_id, display_name) VALUES (?, ?, ?)')
-      .run('target-1', 'host-1', 'Primary Ollama');
+      .prepare('INSERT INTO ollama_targets(id, host_id, display_name, selected_container_id) VALUES (?, ?, ?, ?)')
+      .run('target-1', 'host-1', 'Primary Ollama', 'container-1');
 
     const target = database
-      .prepare('SELECT host_id, display_name FROM ollama_targets WHERE id = ?')
+      .prepare('SELECT host_id, display_name, selected_container_id FROM ollama_targets WHERE id = ?')
       .get('target-1');
     assert.deepEqual(target, {
       host_id: 'host-1',
       display_name: 'Primary Ollama',
+      selected_container_id: 'container-1',
+    });
+
+    assert.throws(() => {
+      database
+        .prepare('INSERT INTO ollama_targets(id, host_id, display_name, selected_container_id) VALUES (?, ?, ?, ?)')
+        .run('target-duplicate', 'host-1', 'Duplicate binding', 'container-1');
     });
 
     assert.throws(() => {

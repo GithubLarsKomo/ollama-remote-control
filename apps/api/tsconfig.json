@@ -10,7 +10,8 @@
     { "path": "../../packages/core" },
     { "path": "../../packages/security" },
     { "path": "../../packages/db" },
-    { "path": "../../packages/ssh" }
+    { "path": "../../packages/ssh" },
+    { "path": "../../packages/docker" }
   ],
   "include": ["src/**/*.ts"]
 }
