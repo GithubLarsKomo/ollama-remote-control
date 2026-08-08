@@ -55,6 +55,10 @@ function createFixture() {
   const databasePath = path.join(directory, 'app.sqlite');
   const database = openDatabase(databasePath);
   applyMigrations(database);
+  database.prepare(`
+    INSERT INTO users(id, username, password_hash, role, created_at)
+    VALUES (?, ?, ?, 'admin', ?)
+  `).run('user-1', 'orchestrator-admin', 'test-only-password-hash', NOW.toISOString());
   const hosts = new SqliteHostOnboardingRepository(database);
   const credentials = new SqliteSshCredentialRepository(database);
   const targets = new SqliteOllamaTargetRepository(database);
