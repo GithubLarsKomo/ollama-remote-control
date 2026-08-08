@@ -234,7 +234,6 @@ function storedUpdateJob(fixture) {
   return fixture.jobs.get(fixture.updateJob.id);
 }
 
-const LOCK = (intentId) => ['lock_acquired', { intentId }];
 const FORWARD = ['forward_started', { candidateDigest: NEW_DIGEST }];
 
 test('queued or running interrupted update before forward terminalizes locally without remote access', async () => {
@@ -256,13 +255,9 @@ test('queued or running interrupted update before forward terminalizes locally w
 });
 
 test('post-forward unchanged original service is health-verified and terminalized without rollback', async () => {
-  const fixture = createFixture({ stages: [LOCK('PLACEHOLDER'), FORWARD] });
-  const events = fixture.jobs.events(fixture.updateJob.id);
-  const lockEvent = events.find((event) => event.eventType === 'stage' && JSON.parse(event.payloadJson).stage === 'lock_acquired');
-  fixture.database.prepare('UPDATE job_events SET payload_json = ? WHERE id = ?').run(
-    JSON.stringify({ stage: 'lock_acquired', intentId: fixture.intent.intentId }),
-    lockEvent.id,
-  );
+  const fixture = createFixture({ stages: [] });
+  fixture.jobs.appendEvent(fixture.updateJob.id, 'stage', { stage: 'lock_acquired', intentId: fixture.intent.intentId });
+  fixture.jobs.appendEvent(fixture.updateJob.id, 'stage', { stage: 'forward_started', candidateDigest: NEW_DIGEST });
   const remote = remoteController('old');
   try {
     await recovery(fixture, remote.remoteFactory).reconcile();
