@@ -224,12 +224,6 @@ function recovery(fixture, remoteFactory, masterKey = MASTER_KEY) {
   );
 }
 
-function stageSequence(fixture) {
-  return fixture.jobs.events(fixture.updateJob.id)
-    .filter((event) => event.eventType === 'stage')
-    .map((event) => JSON.parse(event.payloadJson).stage);
-}
-
 function storedUpdateJob(fixture) {
   return fixture.jobs.get(fixture.updateJob.id);
 }
@@ -305,25 +299,27 @@ test('uncommitted candidate health never commits after restart and is rolled bac
   } finally { fixture.database.close(); }
 });
 
-test('a second restart after recovery replacement resumes by health-checking the proven rollback container without another recreate', async () => {
-  const fixture = createFixture({ stages: [] });
-  fixture.jobs.appendEvent(fixture.updateJob.id, 'stage', { stage: 'lock_acquired', intentId: fixture.intent.intentId });
-  fixture.jobs.appendEvent(fixture.updateJob.id, 'stage', { stage: 'forward_started', candidateDigest: NEW_DIGEST });
-  fixture.jobs.appendEvent(fixture.updateJob.id, 'stage', { stage: 'replacement_created', containerId: 'candidate-container-id' });
-  fixture.jobs.appendEvent(fixture.updateJob.id, 'stage', { stage: 'recovery_rollback_replacement_created', containerId: 'rollback-container-id', imageId: `sha256:${'3'.repeat(64)}` });
-  assert.equal(fixture.bindings.rebindContainer('target-1', 'old-container-id', 'rollback-container-id', NOW.toISOString()), true);
-  const remote = remoteController('changed');
-  remote.remoteFactory = () => ({
-    async validateCompose() {},
-    async replace() { remote.calls.push(['replace']); throw new Error('must not recreate proven rollback'); },
-    async resolveComposeContainer() { remote.calls.push(['resolve']); return 'rollback-container-id'; },
-    async health(targetId, containerId) { remote.calls.push(['health', targetId, containerId]); return healthy(); },
-  });
-  try {
-    await recovery(fixture, remote.remoteFactory).reconcile();
-    assert.deepEqual(remote.calls.map((call) => call[0]), ['resolve', 'health']);
-    assert.equal(storedUpdateJob(fixture).errorClass, 'UPDATE_RECOVERY_ROLLBACK_SUCCEEDED');
-  } finally { fixture.database.close(); }
+test('a second restart after either rollback replacement stage health-checks the proven rollback container without another recreate', async () => {
+  for (const rollbackStage of ['rollback_replacement_created', 'recovery_rollback_replacement_created']) {
+    const fixture = createFixture({ stages: [] });
+    fixture.jobs.appendEvent(fixture.updateJob.id, 'stage', { stage: 'lock_acquired', intentId: fixture.intent.intentId });
+    fixture.jobs.appendEvent(fixture.updateJob.id, 'stage', { stage: 'forward_started', candidateDigest: NEW_DIGEST });
+    fixture.jobs.appendEvent(fixture.updateJob.id, 'stage', { stage: 'replacement_created', containerId: 'candidate-container-id' });
+    fixture.jobs.appendEvent(fixture.updateJob.id, 'stage', { stage: rollbackStage, containerId: 'rollback-container-id', imageId: `sha256:${'3'.repeat(64)}` });
+    assert.equal(fixture.bindings.rebindContainer('target-1', 'old-container-id', 'rollback-container-id', NOW.toISOString()), true);
+    const remote = remoteController('changed');
+    remote.remoteFactory = () => ({
+      async validateCompose() {},
+      async replace() { remote.calls.push(['replace']); throw new Error('must not recreate proven rollback'); },
+      async resolveComposeContainer() { remote.calls.push(['resolve']); return 'rollback-container-id'; },
+      async health(targetId, containerId) { remote.calls.push(['health', targetId, containerId]); return healthy(); },
+    });
+    try {
+      await recovery(fixture, remote.remoteFactory).reconcile();
+      assert.deepEqual(remote.calls.map((call) => call[0]), ['resolve', 'health']);
+      assert.equal(storedUpdateJob(fixture).errorClass, 'UPDATE_RECOVERY_ROLLBACK_SUCCEEDED');
+    } finally { fixture.database.close(); }
+  }
 });
 
 test('unresolved remote, rollback or health failure blocks reconciliation and preserves the mutation lock', async () => {
