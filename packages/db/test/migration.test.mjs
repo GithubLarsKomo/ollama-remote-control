@@ -15,9 +15,9 @@ test('migrations are idempotent and preserve host-target ownership', () => {
   const database = openDatabase(databasePath);
 
   try {
-    assert.equal(applyMigrations(database), 5);
-    assert.equal(applyMigrations(database), 5);
-    assert.equal(getSchemaVersion(database), 5);
+    assert.equal(applyMigrations(database), 6);
+    assert.equal(applyMigrations(database), 6);
+    assert.equal(getSchemaVersion(database), 6);
 
     database
       .prepare('INSERT INTO hosts(id, display_name, hostname, port, username) VALUES (?, ?, ?, ?, ?)')
@@ -58,10 +58,12 @@ test('migrations are idempotent and preserve host-target ownership', () => {
       .prepare(`
         SELECT COUNT(*) AS count
         FROM sqlite_master
-        WHERE type = 'table' AND name IN ('users', 'sessions', 'ssh_credentials')
+        WHERE type = 'table' AND name IN (
+          'users', 'sessions', 'ssh_credentials', 'jobs', 'job_events', 'audit_events'
+        )
       `)
       .get();
-    assert.equal(tables.count, 3);
+    assert.equal(tables.count, 6);
 
     assert.throws(() => {
       database
