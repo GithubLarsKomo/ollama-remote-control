@@ -11,8 +11,8 @@
     "node": ">=24 <25"
   },
   "scripts": {
-    "build": "tsc -b packages/core packages/db packages/ssh packages/docker packages/ollama apps/api",
-    "test": "npm run build && node --test packages/db/test/*.test.mjs apps/api/test/*.test.mjs",
+    "build": "tsc -b packages/core packages/security packages/db packages/ssh packages/docker packages/ollama apps/api",
+    "test": "npm run build && node --test packages/security/test/*.test.mjs packages/db/test/*.test.mjs apps/api/test/*.test.mjs",
     "spike:foundation": "node spikes/foundation/run.mjs"
   },
   "dependencies": {
