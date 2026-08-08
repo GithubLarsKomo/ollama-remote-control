@@ -68,7 +68,8 @@ jobs:
             /tmp/orc-container-state \
             /tmp/orc-lifecycle-mode \
             /tmp/orc-registry-mode \
-            /tmp/orc-compose-mode
+            /tmp/orc-compose-mode \
+            /tmp/orc-compose-stdin
           sudo chmod 666 \
             /tmp/orc-docker-calls \
             /tmp/orc-docker-fixture-mode \
@@ -79,7 +80,8 @@ jobs:
             /tmp/orc-container-state \
             /tmp/orc-lifecycle-mode \
             /tmp/orc-registry-mode \
-            /tmp/orc-compose-mode
+            /tmp/orc-compose-mode \
+            /tmp/orc-compose-stdin
           printf 'single' > /tmp/orc-docker-fixture-mode
           printf 'normal' > /tmp/orc-status-fixture-mode
           printf 'running' > /tmp/orc-container-state
@@ -88,6 +90,7 @@ jobs:
           printf 'normal' > /tmp/orc-compose-mode
           : > /tmp/orc-log-state
           : > /tmp/orc-log-pid
+          : > /tmp/orc-compose-stdin
 
           sudo tee /usr/local/bin/docker >/dev/null <<'EOF'
           #!/usr/bin/env bash
@@ -174,6 +177,26 @@ jobs:
                   printf 'different-container-id\n'
                 else
                   printf 'ollama-container-id\n'
+                fi
+                exit 0
+              fi
+              if [[ "${8:-}" == "-f" && "${9:-}" == "-" && "${10:-}" == "config" && "${11:-}" == "--images" && "${12:-}" == "ollama" ]]; then
+                override="$(cat)"
+                printf '%s' "$override" > /tmp/orc-compose-stdin
+                expected_image='ollama/ollama@sha256:candidate-digest'
+                expected_json='{"services":{"ollama":{"image":"ollama/ollama@sha256:candidate-digest"}}}'
+                if [[ "$override" != "$expected_json" ]]; then
+                  printf 'unexpected compose stdin override\n' >&2
+                  exit 64
+                fi
+                if [[ "$compose_mode" == "pin-fail" ]]; then
+                  printf 'compose pin validation failed secret=COMPOSE-PIN-SECRET\n' >&2
+                  exit 1
+                fi
+                if [[ "$compose_mode" == "pin-mismatch" ]]; then
+                  printf 'ollama/ollama@sha256:different-digest\n'
+                else
+                  printf '%s\n' "$expected_image"
                 fi
                 exit 0
               fi
@@ -330,6 +353,7 @@ jobs:
           ORC_LIFECYCLE_MODE: /tmp/orc-lifecycle-mode
           ORC_REGISTRY_MODE: /tmp/orc-registry-mode
           ORC_COMPOSE_MODE: /tmp/orc-compose-mode
+          ORC_COMPOSE_STDIN: /tmp/orc-compose-stdin
         run: npm test
 
       - name: Remove remote fixtures
