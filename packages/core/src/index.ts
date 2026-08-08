@@ -109,6 +109,7 @@ export interface OllamaTargetRepository {
   saveSelection(target: StoredOllamaTarget): void;
   findById(targetId: OllamaTargetId): StoredOllamaTarget | null;
   findByHostId(hostId: HostId): readonly StoredOllamaTarget[];
+  findAll(): readonly StoredOllamaTarget[];
 }
 
 export interface TargetContainerBindingRepository {
