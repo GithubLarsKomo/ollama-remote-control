@@ -130,6 +130,26 @@ export interface TargetStatusResult {
   };
 }
 
+export type ContainerLifecycleAction = 'start' | 'stop' | 'restart';
+
+export interface ContainerLifecycleResult {
+  readonly job: {
+    readonly id: string;
+    readonly targetId: string;
+    readonly actorUserId: string;
+    readonly kind: string;
+    readonly mutating: boolean;
+    readonly state: 'queued' | 'running' | 'cancelling' | 'succeeded' | 'failed' | 'cancelled';
+    readonly createdAt: string;
+    readonly startedAt: string | null;
+    readonly finishedAt: string | null;
+    readonly resultJson: string | null;
+    readonly errorClass: string | null;
+    readonly exitCode: number | null;
+  };
+  readonly container: TargetStatusResult['container'];
+}
+
 export interface DockerUpdatePreflightMetadata {
   readonly containerId: string;
   readonly containerName: string;
@@ -395,6 +415,33 @@ export const api = {
 
   targetStatus(targetId: string): Promise<TargetStatusResult> {
     return requestJson(`${targetPath(targetId)}/status`);
+  },
+
+  containerLifecycle(
+    targetId: string,
+    action: ContainerLifecycleAction,
+    selectedContainerId?: string,
+  ): Promise<ContainerLifecycleResult> {
+    const path = `${targetPath(targetId)}/container/${action}`;
+    if (action === 'start') {
+      return requestJson(path, {
+        method: 'POST',
+        headers: csrfHeader(),
+      });
+    }
+    if (!selectedContainerId) {
+      throw new ApiError(400, 'CLIENT_CONFIRMATION_MISSING', `Container ${action} requires the current selected container ID.`);
+    }
+    return requestJson(path, {
+      method: 'POST',
+      ...mutationJson({
+        confirmation: {
+          action,
+          targetId,
+          containerId: selectedContainerId,
+        },
+      }),
+    });
   },
 
   updatePreflight(targetId: string): Promise<{ readonly snapshot: PublicUpdateSnapshot }> {
