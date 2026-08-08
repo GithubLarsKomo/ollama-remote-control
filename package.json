@@ -12,7 +12,7 @@
   },
   "scripts": {
     "build": "tsc -b packages/core packages/db packages/ssh packages/docker packages/ollama apps/api",
-    "test": "npm run build && node --test apps/api/test/*.test.mjs",
+    "test": "npm run build && node --test packages/db/test/*.test.mjs apps/api/test/*.test.mjs",
     "spike:foundation": "node spikes/foundation/run.mjs"
   },
   "dependencies": {
