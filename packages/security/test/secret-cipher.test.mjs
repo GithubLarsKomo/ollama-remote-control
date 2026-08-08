@@ -7,6 +7,7 @@ import {
   loadConfiguredMasterKey,
   MasterKeyError,
   SecretCipher,
+  UpdateSnapshotCipher,
 } from '../dist/index.js';
 
 const KEY = Buffer.alloc(32, 0x2a);
@@ -41,6 +42,20 @@ test('tampering, row swaps and wrong key all fail closed', () => {
     ...encrypted,
     authTag: tag.toString('base64'),
   }));
+});
+
+test('update snapshot encryption is bound to snapshot and target context', () => {
+  const cipher = new UpdateSnapshotCipher(KEY);
+  const context = { snapshotId: 'snapshot-1', targetId: 'target-1' };
+  const payload = JSON.stringify({
+    containerInspect: { Config: { Env: ['OLLAMA_API_KEY=rollback-secret'] } },
+  });
+  const encrypted = cipher.encrypt(context, payload);
+
+  assert.equal(cipher.decrypt(context, encrypted), payload);
+  assert.throws(() => cipher.decrypt({ ...context, snapshotId: 'snapshot-2' }, encrypted));
+  assert.throws(() => cipher.decrypt({ ...context, targetId: 'target-2' }, encrypted));
+  assert.throws(() => new UpdateSnapshotCipher(OTHER_KEY).decrypt(context, encrypted));
 });
 
 test('master key loader prefers file and requires canonical 32-byte Base64', () => {
