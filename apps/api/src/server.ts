@@ -16,6 +16,7 @@ import {
   SqliteJobRepository,
   SqliteOllamaTargetRepository,
   SqliteSshCredentialRepository,
+  SqliteUpdateSnapshotRepository,
 } from '@orc/db';
 import { DockerDiscoveryError, type DockerLifecycleAction } from '@orc/docker';
 import {
@@ -62,6 +63,10 @@ import {
   TargetDiscoveryError,
   TargetDiscoveryService,
 } from './targets.js';
+import {
+  UpdatePreflightError,
+  UpdatePreflightService,
+} from './update-preflight.js';
 
 export interface BuildServerOptions {
   readonly databasePath?: string;
@@ -128,6 +133,7 @@ function sendApiError(reply: FastifyReply, error: unknown): FastifyReply {
     || error instanceof TargetLogError
     || error instanceof ContainerLifecycleError
     || error instanceof JobServiceError
+    || error instanceof UpdatePreflightError
   ) {
     return reply.code(error.statusCode).send({ error: { code: error.code, message: error.message } });
   }
@@ -155,6 +161,7 @@ export function buildServer(options: BuildServerOptions = {}): FastifyInstance {
   const hostRepository = new SqliteHostOnboardingRepository(database);
   const credentialRepository = new SqliteSshCredentialRepository(database);
   const targetRepository = new SqliteOllamaTargetRepository(database);
+  const snapshotRepository = new SqliteUpdateSnapshotRepository(database);
   const jobService = new JobService(new SqliteJobRepository(database), now);
   const auditService = new AuditService(new SqliteAuditRepository(database), now);
   const hosts = new HostOnboardingService(hostRepository, masterKey, now);
@@ -168,6 +175,15 @@ export function buildServer(options: BuildServerOptions = {}): FastifyInstance {
     masterKey,
     jobService,
     auditService,
+  );
+  const updatePreflight = new UpdatePreflightService(
+    hostRepository,
+    credentialRepository,
+    targetRepository,
+    snapshotRepository,
+    masterKey,
+    auditService,
+    now,
   );
   const loginLimiter = new LoginLimiter();
   const app = Fastify({ logger: false });
@@ -275,6 +291,13 @@ export function buildServer(options: BuildServerOptions = {}): FastifyInstance {
   registerContainerLifecycleRoute('start');
   registerContainerLifecycleRoute('stop');
   registerContainerLifecycleRoute('restart');
+
+  app.post<{ Params: TargetParams }>('/api/v1/targets/:targetId/container/update-preflight', async (request, reply) => {
+    try {
+      const session = requireAuthenticatedMutation(request);
+      return reply.code(201).send({ snapshot: await updatePreflight.capture(request.params.targetId, session.userId) });
+    } catch (error) { return sendApiError(reply, error); }
+  });
 
   app.get<{ Params: TargetParams; Querystring: LogQuery }>('/api/v1/targets/:targetId/logs/stream', async (request, reply) => {
     let remoteStream;
