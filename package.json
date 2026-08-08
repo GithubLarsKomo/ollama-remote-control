@@ -11,8 +11,8 @@
     "node": ">=24 <25"
   },
   "scripts": {
-    "build": "tsc -b packages/core packages/security packages/db packages/ssh packages/docker packages/ollama apps/api",
-    "test": "npm run build && node --test --test-concurrency=1 packages/security/test/*.test.mjs packages/docker/test/*.test.mjs packages/db/test/*.test.mjs apps/api/test/*.test.mjs",
+    "build": "tsc -b packages/core packages/security packages/db packages/ssh packages/docker packages/ollama apps/api && npm run build --workspace @orc/web",
+    "test": "npm run build && node --test --test-concurrency=1 packages/security/test/*.test.mjs packages/docker/test/*.test.mjs packages/db/test/*.test.mjs apps/api/test/*.test.mjs && npm run test --workspace @orc/web",
     "spike:foundation": "node spikes/foundation/run.mjs"
   },
   "dependencies": {
