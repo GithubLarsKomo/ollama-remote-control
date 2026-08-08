@@ -10,22 +10,30 @@ import {
   getSchemaVersion,
   openDatabase,
   pingDatabase,
+  SqliteAuditRepository,
   SqliteAuthRepository,
   SqliteHostOnboardingRepository,
+  SqliteJobRepository,
   SqliteOllamaTargetRepository,
   SqliteSshCredentialRepository,
 } from '@orc/db';
-import { DockerDiscoveryError } from '@orc/docker';
+import { DockerDiscoveryError, type DockerLifecycleAction } from '@orc/docker';
 import {
   loadConfiguredMasterKey,
   type MasterKeyEnvironment,
 } from '@orc/security';
 import { SshTransportError } from '@orc/ssh';
+import { AuditService } from './audit.js';
 import {
   AuthError,
   AuthService,
   DEFAULT_SESSION_TTL_MS,
 } from './auth.js';
+import {
+  ContainerLifecycleError,
+  ContainerLifecycleService,
+  type ContainerLifecycleConfirmation,
+} from './container-lifecycle.js';
 import {
   clearSessionCookies,
   CSRF_COOKIE,
@@ -40,6 +48,7 @@ import {
   type HostCreateInput,
   type HostProbeInput,
 } from './hosts.js';
+import { JobService, JobServiceError } from './jobs.js';
 import {
   parseLogTail,
   TargetLogError,
@@ -70,6 +79,7 @@ interface HostCreateBody extends HostProbeBody {
   readonly privateKey?: unknown;
 }
 interface TargetSelectionBody { readonly containerId?: unknown; readonly displayName?: unknown; }
+interface ContainerLifecycleBody { readonly confirmation?: ContainerLifecycleConfirmation; }
 interface HostParams { readonly hostId: string; }
 interface TargetParams { readonly targetId: string; }
 interface LogQuery { readonly tail?: unknown; }
@@ -110,7 +120,15 @@ function hostCreateInput(body: HostCreateBody): HostCreateInput {
 }
 function csrfHeader(value: string | string[] | undefined): string | undefined { return Array.isArray(value) ? value[0] : value; }
 function sendApiError(reply: FastifyReply, error: unknown): FastifyReply {
-  if (error instanceof AuthError || error instanceof HostOnboardingError || error instanceof TargetDiscoveryError || error instanceof TargetStatusError || error instanceof TargetLogError) {
+  if (
+    error instanceof AuthError
+    || error instanceof HostOnboardingError
+    || error instanceof TargetDiscoveryError
+    || error instanceof TargetStatusError
+    || error instanceof TargetLogError
+    || error instanceof ContainerLifecycleError
+    || error instanceof JobServiceError
+  ) {
     return reply.code(error.statusCode).send({ error: { code: error.code, message: error.message } });
   }
   if (error instanceof DockerDiscoveryError) {
@@ -137,10 +155,20 @@ export function buildServer(options: BuildServerOptions = {}): FastifyInstance {
   const hostRepository = new SqliteHostOnboardingRepository(database);
   const credentialRepository = new SqliteSshCredentialRepository(database);
   const targetRepository = new SqliteOllamaTargetRepository(database);
+  const jobService = new JobService(new SqliteJobRepository(database), now);
+  const auditService = new AuditService(new SqliteAuditRepository(database), now);
   const hosts = new HostOnboardingService(hostRepository, masterKey, now);
   const targets = new TargetDiscoveryService(hostRepository, credentialRepository, targetRepository, masterKey, now);
   const targetStatus = new TargetStatusService(hostRepository, credentialRepository, targetRepository, masterKey);
   const targetLogs = new TargetLogService(hostRepository, credentialRepository, targetRepository, masterKey);
+  const containerLifecycle = new ContainerLifecycleService(
+    hostRepository,
+    credentialRepository,
+    targetRepository,
+    masterKey,
+    jobService,
+    auditService,
+  );
   const loginLimiter = new LoginLimiter();
   const app = Fastify({ logger: false });
 
@@ -227,6 +255,27 @@ export function buildServer(options: BuildServerOptions = {}): FastifyInstance {
       return reply.send(await targetStatus.read(request.params.targetId));
     } catch (error) { return sendApiError(reply, error); }
   });
+
+  function registerContainerLifecycleRoute(action: DockerLifecycleAction): void {
+    app.post<{ Params: TargetParams; Body: ContainerLifecycleBody }>(
+      `/api/v1/targets/:targetId/container/${action}`,
+      async (request, reply) => {
+        try {
+          const session = requireAuthenticatedMutation(request);
+          return reply.send(await containerLifecycle.execute(
+            request.params.targetId,
+            action,
+            session.userId,
+            request.body?.confirmation,
+          ));
+        } catch (error) { return sendApiError(reply, error); }
+      },
+    );
+  }
+  registerContainerLifecycleRoute('start');
+  registerContainerLifecycleRoute('stop');
+  registerContainerLifecycleRoute('restart');
+
   app.get<{ Params: TargetParams; Querystring: LogQuery }>('/api/v1/targets/:targetId/logs/stream', async (request, reply) => {
     let remoteStream;
     let tail: number;

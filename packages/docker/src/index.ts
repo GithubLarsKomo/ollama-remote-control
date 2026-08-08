@@ -5,9 +5,22 @@ export const DOCKER_ADAPTER_SCOPE = Object.freeze([
 ] as const);
 
 export type DockerDiscoveryErrorCode = 'DOCKER_UNAVAILABLE' | 'DOCKER_OUTPUT_INVALID' | 'CONTAINER_NOT_FOUND';
+export type DockerLifecycleAction = 'start' | 'stop' | 'restart';
+export type DockerLifecycleErrorCode = 'DOCKER_UNAVAILABLE' | 'CONTAINER_NOT_FOUND' | 'CONTAINER_STATE_UNVERIFIED';
 
 export class DockerDiscoveryError extends Error {
   constructor(readonly code: DockerDiscoveryErrorCode, message: string, options?: ErrorOptions) {
+    super(message, options);
+  }
+}
+
+export class DockerLifecycleError extends Error {
+  constructor(
+    readonly code: DockerLifecycleErrorCode,
+    readonly exitCode: number | null,
+    message: string,
+    options?: ErrorOptions,
+  ) {
     super(message, options);
   }
 }
@@ -185,6 +198,41 @@ export async function inspectDockerContainer(
     portBindings: object.HostConfig?.PortBindings && typeof object.HostConfig.PortBindings === 'object' ? object.HostConfig.PortBindings : {},
     labels: labelsFrom(object),
   };
+}
+
+export async function changeDockerContainerState(
+  executor: CommandExecutor,
+  containerId: string,
+  action: DockerLifecycleAction,
+): Promise<DockerContainerStatus> {
+  const result = await executor.exec(['docker', action, containerId]);
+  if (result.exitCode !== 0) {
+    const detail = `${result.stderr}\n${result.stdout}`;
+    if (/no such (object|container)/iu.test(detail)) {
+      throw new DockerLifecycleError('CONTAINER_NOT_FOUND', result.exitCode, 'Selected Docker container was not found.');
+    }
+    throw new DockerLifecycleError('DOCKER_UNAVAILABLE', result.exitCode, `Docker ${action} command failed.`);
+  }
+
+  let verified: DockerContainerStatus;
+  try {
+    verified = await inspectDockerContainer(executor, containerId);
+  } catch (error) {
+    if (error instanceof DockerDiscoveryError && error.code === 'CONTAINER_NOT_FOUND') {
+      throw new DockerLifecycleError('CONTAINER_NOT_FOUND', null, 'Selected Docker container was not found.', { cause: error });
+    }
+    throw new DockerLifecycleError('DOCKER_UNAVAILABLE', null, 'Docker state verification failed.', { cause: error as Error });
+  }
+
+  const expectedRunning = action !== 'stop';
+  if (verified.running !== expectedRunning) {
+    throw new DockerLifecycleError(
+      'CONTAINER_STATE_UNVERIFIED',
+      result.exitCode,
+      `Docker ${action} completed but the expected container state could not be verified.`,
+    );
+  }
+  return verified;
 }
 
 export async function discoverOllamaContainers(executor: CommandExecutor): Promise<DockerDiscoveryResult> {
