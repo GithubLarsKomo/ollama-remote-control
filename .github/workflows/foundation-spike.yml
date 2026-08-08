@@ -66,7 +66,8 @@ jobs:
             /tmp/orc-log-state \
             /tmp/orc-log-pid \
             /tmp/orc-container-state \
-            /tmp/orc-lifecycle-mode
+            /tmp/orc-lifecycle-mode \
+            /tmp/orc-registry-mode
           sudo chmod 666 \
             /tmp/orc-docker-calls \
             /tmp/orc-docker-fixture-mode \
@@ -75,11 +76,13 @@ jobs:
             /tmp/orc-log-state \
             /tmp/orc-log-pid \
             /tmp/orc-container-state \
-            /tmp/orc-lifecycle-mode
+            /tmp/orc-lifecycle-mode \
+            /tmp/orc-registry-mode
           printf 'single' > /tmp/orc-docker-fixture-mode
           printf 'normal' > /tmp/orc-status-fixture-mode
           printf 'running' > /tmp/orc-container-state
           printf 'normal' > /tmp/orc-lifecycle-mode
+          printf 'changed' > /tmp/orc-registry-mode
           : > /tmp/orc-log-state
           : > /tmp/orc-log-pid
 
@@ -90,6 +93,7 @@ jobs:
           mode="$(cat /tmp/orc-docker-fixture-mode 2>/dev/null || printf single)"
           status_mode="$(cat /tmp/orc-status-fixture-mode 2>/dev/null || printf normal)"
           lifecycle_mode="$(cat /tmp/orc-lifecycle-mode 2>/dev/null || printf normal)"
+          registry_mode="$(cat /tmp/orc-registry-mode 2>/dev/null || printf changed)"
           container_state="$(cat /tmp/orc-container-state 2>/dev/null || printf running)"
           case "${1:-}" in
             version)
@@ -134,7 +138,53 @@ jobs:
                 printf 'unsupported fake docker image command\n' >&2
                 exit 64
               fi
-              printf '[{"Id":"sha256:image-current","RepoTags":["ollama/ollama:latest"],"RepoDigests":["ollama/ollama@sha256:current-digest"],"Config":{"Env":["IMAGE_DEFAULT=value"]}}]\n'
+              printf '[{"Id":"sha256:image-current","RepoTags":["ollama/ollama:latest"],"RepoDigests":["ollama/ollama@sha256:current-digest"],"Architecture":"amd64","Os":"linux","Variant":"","Config":{"Env":["IMAGE_DEFAULT=value"]}}]\n'
+              ;;
+            buildx)
+              if [[ "$registry_mode" == "buildx-missing" ]]; then
+                printf 'docker: buildx is not a docker command; secret=REGISTRY-SECRET\n' >&2
+                exit 1
+              fi
+              if [[ "${2:-}" == "version" ]]; then
+                printf 'github.com/docker/buildx v0.30.1\n'
+                exit 0
+              fi
+              if [[ "${2:-}" != "imagetools" || "${3:-}" != "inspect" || -z "${4:-}" || "${5:-}" != "--format" ]]; then
+                printf 'unsupported fake docker buildx arguments\n' >&2
+                exit 64
+              fi
+              if [[ "$registry_mode" == "registry-fail" ]]; then
+                printf 'registry authorization failed token=REGISTRY-SECRET\n' >&2
+                exit 1
+              fi
+              reference="${4:-}"
+              format="${6:-}"
+              if [[ "$format" == '{{json .Manifest}}' ]]; then
+                if [[ "$reference" != "ollama/ollama:latest" ]]; then
+                  printf 'unexpected manifest reference\n' >&2
+                  exit 64
+                fi
+                if [[ "$registry_mode" == "platform-missing" ]]; then
+                  printf '{"schemaVersion":2,"mediaType":"application/vnd.oci.image.index.v1+json","digest":"sha256:index-digest","manifests":[{"digest":"sha256:arm64-digest","platform":{"os":"linux","architecture":"arm64"}}]}\n'
+                else
+                  candidate_digest='sha256:candidate-digest'
+                  [[ "$registry_mode" == "same" ]] && candidate_digest='sha256:current-digest'
+                  printf '{"schemaVersion":2,"mediaType":"application/vnd.oci.image.index.v1+json","digest":"sha256:index-digest","manifests":[{"digest":"%s","platform":{"os":"linux","architecture":"amd64"}},{"digest":"sha256:arm64-digest","platform":{"os":"linux","architecture":"arm64"}}]}\n' "$candidate_digest"
+                fi
+                exit 0
+              fi
+              if [[ "$format" == '{{json .Image}}' ]]; then
+                expected='ollama/ollama@sha256:candidate-digest'
+                [[ "$registry_mode" == "same" ]] && expected='ollama/ollama@sha256:current-digest'
+                if [[ "$reference" != "$expected" ]]; then
+                  printf 'unexpected image reference\n' >&2
+                  exit 64
+                fi
+                printf '{"architecture":"amd64","os":"linux","config":{"Labels":{"org.opencontainers.image.version":"0.33.0"}}}\n'
+                exit 0
+              fi
+              printf 'unsupported fake buildx format\n' >&2
+              exit 64
               ;;
             start|stop|restart)
               action="${1:-}"
@@ -238,6 +288,7 @@ jobs:
           ORC_LOG_PROCESS_PID: /tmp/orc-log-pid
           ORC_CONTAINER_STATE: /tmp/orc-container-state
           ORC_LIFECYCLE_MODE: /tmp/orc-lifecycle-mode
+          ORC_REGISTRY_MODE: /tmp/orc-registry-mode
         run: npm test
 
       - name: Remove remote fixtures
