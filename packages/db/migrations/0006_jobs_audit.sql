@@ -36,18 +36,24 @@ CREATE TABLE IF NOT EXISTS job_events (
 CREATE INDEX IF NOT EXISTS idx_job_events_job_sequence
   ON job_events(job_id, sequence);
 
+CREATE TRIGGER IF NOT EXISTS trg_job_events_no_update
+BEFORE UPDATE ON job_events
+BEGIN
+  SELECT RAISE(ABORT, 'job_events are append-only');
+END;
+
 CREATE TABLE IF NOT EXISTS audit_events (
   id TEXT PRIMARY KEY,
   timestamp TEXT NOT NULL,
-  actor_user_id TEXT NOT NULL REFERENCES users(id) ON DELETE RESTRICT,
-  host_id TEXT REFERENCES hosts(id) ON DELETE SET NULL,
-  target_id TEXT REFERENCES ollama_targets(id) ON DELETE SET NULL,
+  actor_user_id TEXT NOT NULL,
+  host_id TEXT,
+  target_id TEXT,
   action TEXT NOT NULL,
   parameters_redacted_json TEXT NOT NULL,
   result TEXT NOT NULL,
   exit_code INTEGER,
   error_class TEXT,
-  job_id TEXT REFERENCES jobs(id) ON DELETE SET NULL
+  job_id TEXT
 );
 
 CREATE INDEX IF NOT EXISTS idx_audit_events_timestamp
@@ -55,3 +61,9 @@ CREATE INDEX IF NOT EXISTS idx_audit_events_timestamp
 
 CREATE INDEX IF NOT EXISTS idx_audit_events_target_timestamp
   ON audit_events(target_id, timestamp DESC);
+
+CREATE TRIGGER IF NOT EXISTS trg_audit_events_no_update
+BEFORE UPDATE ON audit_events
+BEGIN
+  SELECT RAISE(ABORT, 'audit_events are append-only');
+END;
