@@ -7,6 +7,10 @@ import {
   validateComposeDigestOverride,
 } from '../dist/compose-intent.js';
 
+const CANDIDATE_DIGEST = `sha256:${'a'.repeat(64)}`;
+const OTHER_DIGEST = `sha256:${'b'.repeat(64)}`;
+const CANDIDATE_IMAGE = `ollama/ollama@${CANDIDATE_DIGEST}`;
+
 const context = {
   projectName: 'orc-stack',
   service: 'ollama',
@@ -15,28 +19,27 @@ const context = {
   environmentFiles: [],
 };
 
-test('exact digest reference removes mutable tag and preserves repository spelling', () => {
+test('exact digest reference removes mutable tag and requires canonical SHA-256 encoding', () => {
   assert.equal(
-    exactDigestImageReference('ollama/ollama:latest', 'sha256:candidate-digest'),
-    'ollama/ollama@sha256:candidate-digest',
+    exactDigestImageReference('ollama/ollama:latest', CANDIDATE_DIGEST.toUpperCase()),
+    CANDIDATE_IMAGE,
   );
   assert.equal(
-    exactDigestImageReference('registry.example:5000/team/ollama:v1', 'SHA256:ABC_def-1234567890'),
-    'registry.example:5000/team/ollama@sha256:abc_def-1234567890',
+    exactDigestImageReference('registry.example:5000/team/ollama:v1', CANDIDATE_DIGEST),
+    `registry.example:5000/team/ollama@${CANDIDATE_DIGEST}`,
   );
-  assert.throws(
-    () => exactDigestImageReference('ollama/ollama:latest', 'not-a-digest'),
-    (error) => error instanceof ComposeIntentError && error.code === 'INVALID_IMAGE_DIGEST',
-  );
+  for (const invalid of ['not-a-digest', 'sha256:candidate-digest', `sha256:${'a'.repeat(63)}`, `sha256:${'g'.repeat(64)}`]) {
+    assert.throws(
+      () => exactDigestImageReference('ollama/ollama:latest', invalid),
+      (error) => error instanceof ComposeIntentError && error.code === 'INVALID_IMAGE_DIGEST',
+    );
+  }
 });
 
 test('Compose override is generated as JSON without interpolating YAML or shell syntax', () => {
-  const value = composeDigestOverrideJson(
-    'ollama-service',
-    'ollama/ollama@sha256:candidate-digest',
-  );
+  const value = composeDigestOverrideJson('ollama-service', CANDIDATE_IMAGE);
   assert.deepEqual(JSON.parse(value), {
-    services: { 'ollama-service': { image: 'ollama/ollama@sha256:candidate-digest' } },
+    services: { 'ollama-service': { image: CANDIDATE_IMAGE } },
   });
   assert.equal(value.includes(';'), false);
 });
@@ -47,20 +50,20 @@ test('Compose digest validation sends exact read-only argv and override through 
     async exec(argv, stdin) {
       calls.push({ argv: [...argv], stdin });
       return {
-        stdout: 'docker.io/ollama/ollama@sha256:candidate-digest\n',
+        stdout: `docker.io/ollama/ollama@${CANDIDATE_DIGEST}\n`,
         stderr: '',
         exitCode: 0,
       };
     },
-  }, context, 'ollama/ollama@sha256:candidate-digest');
+  }, context, CANDIDATE_IMAGE);
 
-  assert.equal(result.exactImageReference, 'ollama/ollama@sha256:candidate-digest');
+  assert.equal(result.exactImageReference, CANDIDATE_IMAGE);
   assert.deepEqual(calls, [{
     argv: [
       'docker', 'compose', '-p', 'orc-stack', '--project-directory', '/srv/orc',
       '-f', '/srv/orc/compose.yml', '-f', '-', 'config', '--images', 'ollama',
     ],
-    stdin: '{"services":{"ollama":{"image":"ollama/ollama@sha256:candidate-digest"}}}\n',
+    stdin: `${JSON.stringify({ services: { ollama: { image: CANDIDATE_IMAGE } } })}\n`,
   }]);
 });
 
@@ -70,7 +73,7 @@ test('Compose digest validation fails closed on command failure or mismatched re
       async exec() {
         return { stdout: '', stderr: 'secret=COMPOSE-PIN-SECRET', exitCode: 1 };
       },
-    }, context, 'ollama/ollama@sha256:candidate-digest'),
+    }, context, CANDIDATE_IMAGE),
     (error) => {
       assert(error instanceof ComposeIntentError);
       assert.equal(error.code, 'COMPOSE_PIN_VALIDATION_FAILED');
@@ -82,9 +85,9 @@ test('Compose digest validation fails closed on command failure or mismatched re
   await assert.rejects(
     () => validateComposeDigestOverride({
       async exec() {
-        return { stdout: 'ollama/ollama@sha256:different-digest\n', stderr: '', exitCode: 0 };
+        return { stdout: `ollama/ollama@${OTHER_DIGEST}\n`, stderr: '', exitCode: 0 };
       },
-    }, context, 'ollama/ollama@sha256:candidate-digest'),
+    }, context, CANDIDATE_IMAGE),
     (error) => error instanceof ComposeIntentError && error.code === 'COMPOSE_PIN_MISMATCH',
   );
 });
