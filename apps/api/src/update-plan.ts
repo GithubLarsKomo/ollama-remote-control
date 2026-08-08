@@ -28,7 +28,7 @@ export interface UpdatePlan {
   readonly platform: DockerImagePlatform;
   readonly updateAvailable: boolean;
   readonly currentOllamaVersion: string | null;
-  readonly candidateOllamaVersion: string | null;
+  readonly candidateImageVersion: string | null;
   readonly composeManaged: boolean;
   readonly modelVolumeBackup: {
     readonly included: false;
@@ -288,7 +288,7 @@ export class UpdatePlanService {
           platform: source.platform,
           updateAvailable: false,
           currentOllamaVersion: source.currentOllamaVersion,
-          candidateOllamaVersion: source.currentOllamaVersion,
+          candidateImageVersion: null,
           composeManaged: source.composeManaged,
           modelVolumeBackup: { included: false, warning: MODEL_VOLUME_WARNING },
         };
@@ -315,7 +315,7 @@ export class UpdatePlanService {
         platform: source.platform,
         updateAvailable: source.currentDigest !== candidate.platformDigest && source.currentDigest !== candidate.indexDigest,
         currentOllamaVersion: source.currentOllamaVersion,
-        candidateOllamaVersion: candidate.version,
+        candidateImageVersion: candidate.imageVersion,
         composeManaged: source.composeManaged,
         modelVolumeBackup: { included: false, warning: MODEL_VOLUME_WARNING },
       };
@@ -359,6 +359,7 @@ export class UpdatePlanService {
           currentDigest: plan.currentDigest,
           candidateDigest: plan.candidateDigest,
           candidateIndexDigest: plan.candidateIndexDigest,
+          candidateImageVersion: plan.candidateImageVersion,
           pinned: plan.pinned,
           updateAvailable: plan.updateAvailable,
           platform: plan.platform,
