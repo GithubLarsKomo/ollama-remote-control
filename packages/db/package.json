@@ -11,6 +11,10 @@
     "./target-binding": {
       "types": "./dist/target-binding.d.ts",
       "import": "./dist/target-binding.js"
+    },
+    "./target-catalog": {
+      "types": "./dist/target-catalog.d.ts",
+      "import": "./dist/target-catalog.js"
     }
   },
   "dependencies": {
