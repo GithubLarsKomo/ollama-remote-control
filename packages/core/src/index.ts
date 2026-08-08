@@ -55,6 +55,27 @@ export interface AuthRepository {
   revokeSession(sessionId: string, revokedAt: string): void;
 }
 
+export interface EncryptedSecret {
+  readonly algorithm: 'aes-256-gcm';
+  readonly keyVersion: number;
+  readonly nonce: string;
+  readonly ciphertext: string;
+  readonly authTag: string;
+}
+
+export interface StoredSshCredential {
+  readonly id: string;
+  readonly hostId: HostId;
+  readonly encryptedPrivateKey: EncryptedSecret;
+  readonly createdAt: string;
+  readonly updatedAt: string;
+}
+
+export interface SshCredentialRepository {
+  save(credential: StoredSshCredential): void;
+  findByHostId(hostId: HostId): StoredSshCredential | null;
+}
+
 export interface ApiHealthResponse {
   readonly status: 'ok';
   readonly service: 'ollama-remote-control-api';

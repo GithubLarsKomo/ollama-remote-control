@@ -18,3 +18,4 @@ Accepted records are not rewritten to change the decision. A change creates a ne
 - [ADR-0002 — Security and secret boundaries](ADR-0002-security-and-secret-boundaries.md) — accepted
 - [ADR-0003 — Initial technology stack](ADR-0003-initial-technology-stack.md) — accepted
 - [ADR-0004 — Local admin password and session security](ADR-0004-local-admin-passwords-and-sessions.md) — accepted
+- [ADR-0005 — SSH credential encryption and master-key source](ADR-0005-ssh-credential-encryption.md) — accepted

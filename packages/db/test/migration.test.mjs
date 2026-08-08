@@ -15,9 +15,9 @@ test('migrations are idempotent and preserve host-target ownership', () => {
   const database = openDatabase(databasePath);
 
   try {
-    assert.equal(applyMigrations(database), 2);
-    assert.equal(applyMigrations(database), 2);
-    assert.equal(getSchemaVersion(database), 2);
+    assert.equal(applyMigrations(database), 3);
+    assert.equal(applyMigrations(database), 3);
+    assert.equal(getSchemaVersion(database), 3);
 
     database
       .prepare('INSERT INTO hosts(id, display_name, hostname, port, username) VALUES (?, ?, ?, ?, ?)')
@@ -45,10 +45,29 @@ test('migrations are idempotent and preserve host-target ownership', () => {
       .prepare(`
         SELECT COUNT(*) AS count
         FROM sqlite_master
-        WHERE type = 'table' AND name IN ('users', 'sessions')
+        WHERE type = 'table' AND name IN ('users', 'sessions', 'ssh_credentials')
       `)
       .get();
-    assert.equal(tables.count, 2);
+    assert.equal(tables.count, 3);
+
+    assert.throws(() => {
+      database
+        .prepare(`
+          INSERT INTO ssh_credentials(
+            id, host_id, algorithm, key_version, nonce, ciphertext, auth_tag,
+            created_at, updated_at
+          ) VALUES (?, ?, 'aes-256-gcm', 1, ?, ?, ?, ?, ?)
+        `)
+        .run(
+          'credential-orphan',
+          'missing-host',
+          'nonce',
+          'ciphertext',
+          'tag',
+          '2026-08-08T00:00:00.000Z',
+          '2026-08-08T00:00:00.000Z',
+        );
+    });
   } finally {
     database.close();
   }
