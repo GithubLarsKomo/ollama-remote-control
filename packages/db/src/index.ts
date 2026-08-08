@@ -10,9 +10,13 @@ import type {
 
 const require = createRequire(import.meta.url);
 
+interface RunResult {
+  readonly changes: number;
+}
+
 interface Statement {
   get(...params: unknown[]): Record<string, unknown> | undefined;
-  run(...params: unknown[]): unknown;
+  run(...params: unknown[]): RunResult;
 }
 
 export interface DatabaseConnection {
@@ -133,13 +137,15 @@ export class SqliteAuthRepository implements AuthRepository {
     return Number(row?.count ?? 0);
   }
 
-  createAdmin(user: StoredUser): void {
-    this.database
+  createAdminIfNoneExists(user: StoredUser): boolean {
+    const result = this.database
       .prepare(`
         INSERT INTO users(id, username, password_hash, role, created_at)
-        VALUES (?, ?, ?, ?, ?)
+        SELECT ?, ?, ?, ?, ?
+        WHERE NOT EXISTS (SELECT 1 FROM users)
       `)
       .run(user.id, user.username, user.passwordHash, user.role, user.createdAt);
+    return result.changes === 1;
   }
 
   findUserByUsername(username: string): StoredUser | null {
