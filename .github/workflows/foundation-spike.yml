@@ -127,7 +127,14 @@ jobs:
                 health=none
                 started_at='2026-08-08T06:00:00.000000000Z'
               fi
-              printf '[{"Id":"%s","Name":"/%s","RestartCount":2,"Config":{"Image":"ollama/ollama:latest","Env":["OLLAMA_HOST=0.0.0.0:11434","OLLAMA_API_KEY=top-secret"],"Labels":{"com.docker.compose.service":"ollama"}},"State":{"Running":%s,"Status":"%s","StartedAt":"%s","OOMKilled":false,"Health":{"Status":"%s"}},"Mounts":[{"Source":"/srv/ollama","Destination":"/root/.ollama","Type":"bind"}],"HostConfig":{"PortBindings":{"11434/tcp":[{"HostIp":"127.0.0.1","HostPort":"11434"}]}}}]\n' "$id" "${id/ollama-container-id/ollama}" "$running" "$state_status" "$started_at" "$health"
+              printf '[{"Id":"%s","Name":"/%s","Image":"sha256:image-current","RestartCount":2,"Config":{"Image":"ollama/ollama:latest","Env":["OLLAMA_HOST=0.0.0.0:11434","OLLAMA_API_KEY=top-secret"],"Labels":{"com.docker.compose.project":"orc-stack","com.docker.compose.service":"ollama","com.docker.compose.project.config_files":"/srv/orc/compose.yml","com.docker.compose.project.working_dir":"/srv/orc"}},"State":{"Running":%s,"Status":"%s","StartedAt":"%s","OOMKilled":false,"Health":{"Status":"%s"}},"Mounts":[{"Source":"/srv/ollama","Destination":"/root/.ollama","Type":"bind"}],"HostConfig":{"PortBindings":{"11434/tcp":[{"HostIp":"127.0.0.1","HostPort":"11434"}]},"RestartPolicy":{"Name":"unless-stopped"},"NetworkMode":"orc_default","Devices":[],"DeviceRequests":[{"Driver":"nvidia","Count":-1,"Capabilities":[["gpu"]]}]},"NetworkSettings":{"Networks":{"orc_default":{"Aliases":["ollama"]}}}}]\n' "$id" "${id/ollama-container-id/ollama}" "$running" "$state_status" "$started_at" "$health"
+              ;;
+            image)
+              if [[ "${2:-}" != "inspect" || "${3:-}" != "ollama/ollama:latest" ]]; then
+                printf 'unsupported fake docker image command\n' >&2
+                exit 64
+              fi
+              printf '[{"Id":"sha256:image-current","RepoTags":["ollama/ollama:latest"],"RepoDigests":["ollama/ollama@sha256:current-digest"],"Config":{"Env":["IMAGE_DEFAULT=value"]}}]\n'
               ;;
             start|stop|restart)
               action="${1:-}"
