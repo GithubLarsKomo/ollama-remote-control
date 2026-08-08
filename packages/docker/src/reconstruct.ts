@@ -60,6 +60,8 @@ const COMPOSE_LABELS = {
   oneoff: 'com.docker.compose.oneoff',
 } as const;
 
+const DEFAULT_SHM_SIZE = 64 * 1024 * 1024;
+
 function labelsFrom(containerInspect: Record<string, any>): Record<string, string> {
   const raw = containerInspect.Config?.Labels;
   if (!raw || typeof raw !== 'object') return {};
@@ -171,6 +173,22 @@ function pushIfMeaningful(unsupported: string[], prefix: string, object: Record<
   for (const key of keys) if (nonEmpty(object[key])) unsupported.push(`${prefix}.${key}`);
 }
 
+function pushIf(unsupported: string[], field: string, condition: boolean): void {
+  if (condition) unsupported.push(field);
+}
+
+function nonDefaultLogConfig(value: unknown): boolean {
+  if (!value || typeof value !== 'object') return false;
+  const log = value as Record<string, any>;
+  const type = String(log.Type ?? '').trim();
+  const config = log.Config && typeof log.Config === 'object' ? log.Config : {};
+  return Boolean((type && type !== 'json-file') || Object.keys(config).length > 0);
+}
+
+function nonDefaultConsoleSize(value: unknown): boolean {
+  return Array.isArray(value) && value.some((entry) => Number(entry) !== 0);
+}
+
 export function analyzeStandaloneReconstruction(containerInspect: Record<string, any>): StandaloneStrategy {
   const config = containerInspect.Config && typeof containerInspect.Config === 'object' ? containerInspect.Config : {};
   const host = containerInspect.HostConfig && typeof containerInspect.HostConfig === 'object' ? containerInspect.HostConfig : {};
@@ -180,18 +198,39 @@ export function analyzeStandaloneReconstruction(containerInspect: Record<string,
   const mounts = Array.isArray(containerInspect.Mounts) ? containerInspect.Mounts : [];
   const unsupported: string[] = [];
 
-  // The first standalone execution adapter will deliberately support only common Ollama runtime primitives.
-  // High-impact settings outside that set must be made explicit before any recreate mutation is permitted.
+  // The first standalone execution adapter will deliberately support common Ollama runtime primitives:
+  // image, env, labels, command/entrypoint, working directory/user, mounts, port bindings,
+  // restart policy and one network. Everything else with recreate impact must be explicit here.
   pushIfMeaningful(unsupported, 'HostConfig', host, [
     'Privileged', 'CapAdd', 'CapDrop', 'SecurityOpt', 'Sysctls', 'Ulimits', 'Tmpfs',
     'ReadonlyRootfs', 'AutoRemove', 'Links', 'VolumesFrom', 'ExtraHosts', 'Dns', 'DnsOptions',
     'DnsSearch', 'GroupAdd', 'DeviceRequests', 'Devices', 'DeviceCgroupRules', 'Memory', 'MemorySwap',
     'MemoryReservation', 'NanoCpus', 'CpuShares', 'CpusetCpus', 'CpusetMems', 'OomKillDisable',
-    'PidsLimit', 'BlkioWeight', 'LogConfig', 'PidMode', 'IpcMode', 'UTSMode', 'UsernsMode', 'CgroupnsMode',
+    'PidsLimit', 'BlkioWeight', 'PidMode', 'IpcMode', 'UTSMode', 'UsernsMode', 'CgroupnsMode',
+    'CgroupParent',
   ]);
+  pushIf(unsupported, 'HostConfig.ShmSize', Number(host.ShmSize ?? DEFAULT_SHM_SIZE) !== DEFAULT_SHM_SIZE);
+  pushIf(unsupported, 'HostConfig.Runtime', Boolean(String(host.Runtime ?? '').trim()) && String(host.Runtime).trim() !== 'runc');
+  pushIf(unsupported, 'HostConfig.Init', host.Init === true);
+  pushIf(unsupported, 'HostConfig.OomScoreAdj', Number(host.OomScoreAdj ?? 0) !== 0);
+  pushIf(unsupported, 'HostConfig.PublishAllPorts', host.PublishAllPorts === true);
+  pushIf(unsupported, 'HostConfig.Isolation', Boolean(String(host.Isolation ?? '').trim()) && String(host.Isolation).trim() !== 'default');
+  pushIf(unsupported, 'HostConfig.ConsoleSize', nonDefaultConsoleSize(host.ConsoleSize));
+  pushIf(unsupported, 'HostConfig.LogConfig', nonDefaultLogConfig(host.LogConfig));
+
   pushIfMeaningful(unsupported, 'Config', config, [
     'Healthcheck', 'StopSignal', 'StopTimeout', 'Shell', 'OnBuild', 'MacAddress',
   ]);
+  pushIf(unsupported, 'Config.Tty', config.Tty === true);
+  pushIf(unsupported, 'Config.OpenStdin', config.OpenStdin === true);
+  pushIf(unsupported, 'Config.StdinOnce', config.StdinOnce === true);
+  pushIf(unsupported, 'Config.Domainname', Boolean(String(config.Domainname ?? '').trim()));
+
+  const containerId = String(containerInspect.Id ?? '');
+  const hostname = String(config.Hostname ?? '').trim();
+  const defaultHostname = containerId ? containerId.slice(0, 12) : '';
+  pushIf(unsupported, 'Config.Hostname', Boolean(hostname) && (!defaultHostname || hostname !== defaultHostname));
+
   if (Object.keys(networks).length > 1) unsupported.push('NetworkSettings.Networks.multiple');
   for (const mount of mounts) {
     const type = String(mount?.Type ?? '');
