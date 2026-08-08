@@ -41,6 +41,10 @@ import {
   type HostProbeInput,
 } from './hosts.js';
 import {
+  TargetStatusError,
+  TargetStatusService,
+} from './status.js';
+import {
   TargetDiscoveryError,
   TargetDiscoveryService,
 } from './targets.js';
@@ -62,6 +66,7 @@ interface HostCreateBody extends HostProbeBody {
 }
 interface TargetSelectionBody { readonly containerId?: unknown; readonly displayName?: unknown; }
 interface HostParams { readonly hostId: string; }
+interface TargetParams { readonly targetId: string; }
 interface LoginBucket { failures: number; resetAt: number; }
 
 class LoginLimiter {
@@ -99,11 +104,12 @@ function hostCreateInput(body: HostCreateBody): HostCreateInput {
 }
 function csrfHeader(value: string | string[] | undefined): string | undefined { return Array.isArray(value) ? value[0] : value; }
 function sendApiError(reply: FastifyReply, error: unknown): FastifyReply {
-  if (error instanceof AuthError || error instanceof HostOnboardingError || error instanceof TargetDiscoveryError) {
+  if (error instanceof AuthError || error instanceof HostOnboardingError || error instanceof TargetDiscoveryError || error instanceof TargetStatusError) {
     return reply.code(error.statusCode).send({ error: { code: error.code, message: error.message } });
   }
   if (error instanceof DockerDiscoveryError) {
-    return reply.code(502).send({ error: { code: error.code, message: error.message } });
+    const statusCode = error.code === 'CONTAINER_NOT_FOUND' ? 404 : 502;
+    return reply.code(statusCode).send({ error: { code: error.code, message: error.message } });
   }
   if (error instanceof SshTransportError) {
     const statusCode = error.code === 'SSH_HOST_KEY_MISMATCH' ? 409 : error.code === 'AUTH_FAILED' ? 422 : 502;
@@ -127,6 +133,7 @@ export function buildServer(options: BuildServerOptions = {}): FastifyInstance {
   const targetRepository = new SqliteOllamaTargetRepository(database);
   const hosts = new HostOnboardingService(hostRepository, masterKey, now);
   const targets = new TargetDiscoveryService(hostRepository, credentialRepository, targetRepository, masterKey, now);
+  const targetStatus = new TargetStatusService(hostRepository, credentialRepository, targetRepository, masterKey);
   const loginLimiter = new LoginLimiter();
   const app = Fastify({ logger: false });
 
@@ -206,6 +213,12 @@ export function buildServer(options: BuildServerOptions = {}): FastifyInstance {
   app.get<{ Params: HostParams }>('/api/v1/hosts/:hostId/targets', async (request, reply) => {
     try { requireAuthenticated(request); return reply.send({ targets: targetRepository.findByHostId(request.params.hostId) }); }
     catch (error) { return sendApiError(reply, error); }
+  });
+  app.get<{ Params: TargetParams }>('/api/v1/targets/:targetId/status', async (request, reply) => {
+    try {
+      requireAuthenticated(request);
+      return reply.send(await targetStatus.read(request.params.targetId));
+    } catch (error) { return sendApiError(reply, error); }
   });
 
   app.addHook('onClose', async () => { database.close(); });
