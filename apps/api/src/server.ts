@@ -18,6 +18,7 @@ import {
   SqliteSshCredentialRepository,
   SqliteUpdateSnapshotRepository,
 } from '@orc/db';
+import { SqliteHostCatalogRepository } from '@orc/db/host-catalog';
 import { SqliteTargetContainerBindingRepository } from '@orc/db/target-binding';
 import { SqliteTargetCatalogRepository } from '@orc/db/target-catalog';
 import { DockerDiscoveryError, type DockerLifecycleAction } from '@orc/docker';
@@ -61,6 +62,7 @@ import {
   OllamaHealthError,
   OllamaHealthService,
 } from './ollama-health.js';
+import { publicDockerDiscovery } from './public-discovery.js';
 import {
   TargetStatusError,
   TargetStatusService,
@@ -209,6 +211,7 @@ export function buildServer(options: BuildServerOptions = {}): FastifyInstance {
   const sessionTtlMs = options.sessionTtlMs ?? DEFAULT_SESSION_TTL_MS;
   const auth = new AuthService(new SqliteAuthRepository(database), now, sessionTtlMs);
   const hostRepository = new SqliteHostOnboardingRepository(database);
+  const hostCatalogRepository = new SqliteHostCatalogRepository(database);
   const credentialRepository = new SqliteSshCredentialRepository(database);
   const targetRepository = new SqliteOllamaTargetRepository(database);
   const targetCatalogRepository = new SqliteTargetCatalogRepository(database);
@@ -342,6 +345,10 @@ export function buildServer(options: BuildServerOptions = {}): FastifyInstance {
     try { auth.logout(requireAuthenticatedMutation(request)); reply.header('set-cookie', clearSessionCookies()); return reply.code(204).send(); }
     catch (error) { return sendApiError(reply, error); }
   });
+  app.get('/api/v1/hosts', async (request, reply) => {
+    try { requireAuthenticated(request); return reply.send({ hosts: hostCatalogRepository.listEnabled() }); }
+    catch (error) { return sendApiError(reply, error); }
+  });
   app.post<{ Body: HostProbeBody }>('/api/v1/hosts/probe', async (request, reply) => {
     try { requireAuthenticatedMutation(request); return reply.send(await hosts.probe(hostProbeInput(request.body))); }
     catch (error) { return sendApiError(reply, error); }
@@ -353,8 +360,10 @@ export function buildServer(options: BuildServerOptions = {}): FastifyInstance {
   app.post<{ Params: HostParams }>(
     '/api/v1/hosts/:hostId/discover-ollama',
     async (request, reply) => {
-      try { requireAuthenticatedMutation(request); return reply.send(await targets.discover(request.params.hostId)); }
-      catch (error) { return sendApiError(reply, error); }
+      try {
+        requireAuthenticatedMutation(request);
+        return reply.send(publicDockerDiscovery(await targets.discover(request.params.hostId)));
+      } catch (error) { return sendApiError(reply, error); }
     },
   );
   app.post<{ Params: HostParams; Body: TargetSelectionBody }>(
