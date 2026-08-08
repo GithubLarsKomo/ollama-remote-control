@@ -20,6 +20,7 @@ import {
   formatTimestamp,
 } from './format.js';
 import LifecyclePanel from './LifecyclePanel.js';
+import LiveLogsPanel from './LiveLogsPanel.js';
 import OnboardingPanel from './OnboardingPanel.js';
 import UpdatePanel from './UpdatePanel.js';
 
@@ -382,6 +383,15 @@ function Dashboard({ session, onSignedOut }: { readonly session: SessionView; re
             <GpuCard status={status} />
             <StorageCard status={status} />
           </section>
+        ) : null}
+
+        {status && status.target.id === selectedTargetId ? (
+          <LiveLogsPanel
+            disabled={operationBusy}
+            key={`logs:${status.target.id}:${status.target.selectedContainerId}`}
+            onSignedOut={onSignedOut}
+            status={status}
+          />
         ) : null}
 
         {status && status.target.id === selectedTargetId ? (
