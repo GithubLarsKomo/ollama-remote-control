@@ -28,13 +28,23 @@ Ollama Remote Control reaches managed Linux hosts through SSH. The managed host'
 
 SSH private keys and update snapshots are encrypted with a persistent 32-byte master key that must remain outside SQLite and outside the image.
 
-Create it once on the deployment host:
+The production image runs as the official Node image's non-root `node` user (UID/GID 1000). For file-backed Compose secrets, local Docker Compose bind-mounts the source file and cannot portably enforce `uid`, `gid` or `mode` from the Compose definition. Therefore prepare the host file itself with restrictive ownership and permissions:
 
 ```bash
 mkdir -p secrets
+tmp="$(mktemp)"
 umask 077
-openssl rand 32 | base64 -w0 > secrets/orc_master_key
-printf '\n' >> secrets/orc_master_key
+openssl rand 32 | base64 -w0 > "$tmp"
+printf '\n' >> "$tmp"
+sudo install -o 1000 -g 1000 -m 0400 "$tmp" secrets/orc_master_key
+rm -f "$tmp"
+```
+
+Verify before starting:
+
+```bash
+stat -c '%u:%g:%a %n' secrets/orc_master_key
+# expected: 1000:1000:400 secrets/orc_master_key
 ```
 
 Do not regenerate this file on container recreation. Losing or replacing it makes existing encrypted credentials/snapshots undecryptable. Back it up through the same protected secret-management process used for other infrastructure keys.
@@ -45,7 +55,7 @@ The default `compose.yaml` mounts it read-only at `/run/secrets/orc_master_key` 
 ORC_MASTER_KEY_FILE=/run/secrets/orc_master_key
 ```
 
-To keep the secret elsewhere, set `ORC_MASTER_KEY_SECRET_FILE` to the host path before invoking Compose.
+To keep the secret elsewhere, set `ORC_MASTER_KEY_SECRET_FILE` to the host path before invoking Compose and retain equivalent restrictive ownership/permissions.
 
 ## Start
 
@@ -69,7 +79,7 @@ The named `orc-data` volume contains the SQLite database under `/data`. It is th
 
 The Compose definition applies these defaults:
 
-- runtime user `node` (non-root);
+- runtime user `node` (non-root, UID/GID 1000 in the pinned base family);
 - read-only root filesystem;
 - `cap_drop: ALL`;
 - `no-new-privileges:true`;
@@ -77,11 +87,11 @@ The Compose definition applies these defaults:
 - `/data` named volume;
 - bounded tmpfs at `/tmp`;
 - loopback-only published port;
-- external file secret for the encryption master key;
+- external read-only file secret for the encryption master key;
 - no `/var/run/docker.sock` mount;
 - no port 11434 publication.
 
-The image contains compiled application/package output, the built SPA and production dependencies. TypeScript source/tests and local secret/data files are not copied into the runtime image.
+The image contains compiled application/package output, database migration SQL, the built SPA and production dependencies. TypeScript source/tests and local secret/data files are not copied into the runtime image.
 
 ## Reverse proxy
 
