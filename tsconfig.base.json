@@ -1,0 +1,23 @@
+{
+  "compilerOptions": {
+    "target": "ES2024",
+    "module": "NodeNext",
+    "moduleResolution": "NodeNext",
+    "strict": true,
+    "declaration": true,
+    "declarationMap": true,
+    "sourceMap": true,
+    "esModuleInterop": true,
+    "forceConsistentCasingInFileNames": true,
+    "skipLibCheck": true,
+    "types": ["node"],
+    "baseUrl": ".",
+    "paths": {
+      "@orc/core": ["packages/core/src/index.ts"],
+      "@orc/db": ["packages/db/src/index.ts"],
+      "@orc/ssh": ["packages/ssh/src/index.ts"],
+      "@orc/docker": ["packages/docker/src/index.ts"],
+      "@orc/ollama": ["packages/ollama/src/index.ts"]
+    }
+  }
+}
