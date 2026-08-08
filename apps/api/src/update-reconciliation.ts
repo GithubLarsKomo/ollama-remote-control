@@ -35,6 +35,10 @@ const CONTAINER_KEYS = new Set([
   'rollbackContainerId',
   'lastKnownContainerId',
 ]);
+const ROLLBACK_REPLACEMENT_STAGES = new Set([
+  'rollback_replacement_created',
+  'recovery_rollback_replacement_created',
+]);
 
 interface SnapshotPayload {
   readonly schemaVersion: 1;
@@ -145,7 +149,7 @@ function knownContainerIds(stages: readonly StageRecord[], oldContainerId: strin
 function provenRecoveryRollbackIds(stages: readonly StageRecord[]): ReadonlySet<string> {
   const ids = new Set<string>();
   for (const stage of stages) {
-    if (stage.stage !== 'recovery_rollback_replacement_created') continue;
+    if (!ROLLBACK_REPLACEMENT_STAGES.has(stage.stage)) continue;
     const value = stage.payload.containerId;
     if (typeof value === 'string' && CONTAINER_ID.test(value)) ids.add(value);
   }
