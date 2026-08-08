@@ -132,7 +132,8 @@ test('update plan compares the matching multi-arch platform digest and preserves
     assert.equal(plan.updateAvailable, true);
     assert.equal(plan.pinned, false);
     assert.equal(plan.currentOllamaVersion, 'ollama version is 0.32.5');
-    assert.equal(plan.candidateOllamaVersion, '0.33.0');
+    assert.equal(plan.candidateImageVersion, '0.33.0');
+    assert.equal('candidateOllamaVersion' in plan, false);
     assert.equal(plan.composeManaged, true);
     assert.equal(plan.modelVolumeBackup.included, false);
     assert.match(plan.modelVolumeBackup.warning, /not backed up/i);
@@ -254,6 +255,7 @@ test('digest-pinned snapshot remains pinned and creates a plan without any regis
     assert.equal(response.json().plan.pinned, true);
     assert.equal(response.json().plan.currentDigest, 'sha256:pinned-digest');
     assert.equal(response.json().plan.candidateDigest, 'sha256:pinned-digest');
+    assert.equal(response.json().plan.candidateImageVersion, null);
     assert.equal(response.json().plan.updateAvailable, false);
     assert.deepEqual(dockerCalls(), []);
   } finally {
