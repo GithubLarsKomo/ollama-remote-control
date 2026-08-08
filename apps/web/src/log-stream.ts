@@ -57,17 +57,25 @@ export async function openLogStream(targetId: string, tail: LogTail, signal: Abo
   return response;
 }
 
+function nextFrameBoundary(buffer: string): { readonly index: number; readonly length: number } | null {
+  const lf = buffer.indexOf('\n\n');
+  const crlf = buffer.indexOf('\r\n\r\n');
+  if (lf < 0 && crlf < 0) return null;
+  if (lf >= 0 && (crlf < 0 || lf < crlf)) return { index: lf, length: 2 };
+  return { index: crlf, length: 4 };
+}
+
 export class SseParser {
   private buffer = '';
 
   push(chunk: string): readonly SseFrame[] {
-    this.buffer += chunk.replace(/\r\n/gu, '\n').replace(/\r/gu, '\n');
+    this.buffer += chunk;
     const frames: SseFrame[] = [];
     while (true) {
-      const boundary = this.buffer.indexOf('\n\n');
-      if (boundary < 0) break;
-      const raw = this.buffer.slice(0, boundary);
-      this.buffer = this.buffer.slice(boundary + 2);
+      const boundary = nextFrameBoundary(this.buffer);
+      if (!boundary) break;
+      const raw = this.buffer.slice(0, boundary.index);
+      this.buffer = this.buffer.slice(boundary.index + boundary.length);
       const frame = parseFrame(raw);
       if (frame) frames.push(frame);
     }
@@ -82,7 +90,7 @@ export class SseParser {
 function parseFrame(raw: string): SseFrame | null {
   let event = 'message';
   const data: string[] = [];
-  for (const line of raw.split('\n')) {
+  for (const line of raw.split(/\r\n|\n|\r/u)) {
     if (!line || line.startsWith(':')) continue;
     const separator = line.indexOf(':');
     const field = separator < 0 ? line : line.slice(0, separator);
