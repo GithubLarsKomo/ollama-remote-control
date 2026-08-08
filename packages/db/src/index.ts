@@ -18,7 +18,9 @@ import type {
   StoredOllamaTarget,
   StoredSession,
   StoredSshCredential,
+  StoredUpdateSnapshot,
   StoredUser,
+  UpdateSnapshotRepository,
   UserRole,
 } from '@orc/core';
 
@@ -49,6 +51,7 @@ const migrations: readonly Migration[] = [
   { version: 4, name: 'host-identity', source: new URL('../migrations/0004_host_identity.sql', import.meta.url) },
   { version: 5, name: 'target-binding', source: new URL('../migrations/0005_target_binding.sql', import.meta.url) },
   { version: 6, name: 'jobs-audit', source: new URL('../migrations/0006_jobs_audit.sql', import.meta.url) },
+  { version: 7, name: 'update-snapshots', source: new URL('../migrations/0007_update_snapshots.sql', import.meta.url) },
 ];
 
 export function openDatabase(filename: string): DatabaseConnection {
@@ -148,6 +151,17 @@ function mapAuditEvent(row: Record<string, unknown>): StoredAuditEvent {
     exitCode: row.exit_code === null ? null : Number(row.exit_code),
     errorClass: row.error_class === null ? null : String(row.error_class),
     jobId: row.job_id === null ? null : String(row.job_id),
+  };
+}
+function mapUpdateSnapshot(row: Record<string, unknown> | undefined): StoredUpdateSnapshot | null {
+  if (!row) return null;
+  return {
+    id: String(row.id),
+    targetId: String(row.target_id),
+    actorUserId: String(row.actor_user_id),
+    createdAt: String(row.created_at),
+    publicMetadataJson: String(row.public_metadata_json),
+    encryptedPayload: mapEncryptedSecret(row),
   };
 }
 function insertCredential(database: DatabaseConnection, credential: StoredSshCredential): void {
@@ -329,5 +343,46 @@ export class SqliteAuditRepository implements AuditRepository {
              parameters_redacted_json, result, exit_code, error_class, job_id
       FROM audit_events WHERE target_id = ? ORDER BY timestamp, id
     `).all(targetId).map(mapAuditEvent);
+  }
+}
+
+export class SqliteUpdateSnapshotRepository implements UpdateSnapshotRepository {
+  constructor(private readonly database: DatabaseConnection) {}
+
+  save(snapshot: StoredUpdateSnapshot): void {
+    const encrypted = snapshot.encryptedPayload;
+    this.database.prepare(`
+      INSERT INTO update_snapshots(
+        id, target_id, actor_user_id, created_at, public_metadata_json,
+        algorithm, key_version, nonce, ciphertext, auth_tag
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(
+      snapshot.id,
+      snapshot.targetId,
+      snapshot.actorUserId,
+      snapshot.createdAt,
+      snapshot.publicMetadataJson,
+      encrypted.algorithm,
+      encrypted.keyVersion,
+      encrypted.nonce,
+      encrypted.ciphertext,
+      encrypted.authTag,
+    );
+  }
+
+  findById(snapshotId: string): StoredUpdateSnapshot | null {
+    return mapUpdateSnapshot(this.database.prepare(`
+      SELECT id, target_id, actor_user_id, created_at, public_metadata_json,
+             algorithm, key_version, nonce, ciphertext, auth_tag
+      FROM update_snapshots WHERE id = ?
+    `).get(snapshotId));
+  }
+
+  listByTarget(targetId: string): readonly StoredUpdateSnapshot[] {
+    return this.database.prepare(`
+      SELECT id, target_id, actor_user_id, created_at, public_metadata_json,
+             algorithm, key_version, nonce, ciphertext, auth_tag
+      FROM update_snapshots WHERE target_id = ? ORDER BY created_at DESC, id DESC
+    `).all(targetId).map((row) => mapUpdateSnapshot(row)!).filter(Boolean);
   }
 }
