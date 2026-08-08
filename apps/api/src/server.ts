@@ -68,6 +68,10 @@ import {
   TargetDiscoveryService,
 } from './targets.js';
 import {
+  UpdateExecutionIntentError,
+  UpdateExecutionIntentService,
+} from './update-execution-intent.js';
+import {
   UpdatePlanError,
   UpdatePlanService,
 } from './update-plan.js';
@@ -97,6 +101,7 @@ interface HostCreateBody extends HostProbeBody {
 }
 interface TargetSelectionBody { readonly containerId?: unknown; readonly displayName?: unknown; }
 interface ContainerLifecycleBody { readonly confirmation?: ContainerLifecycleConfirmation; }
+interface UpdateIntentBody { readonly snapshotId?: unknown; }
 interface HostParams { readonly hostId: string; }
 interface TargetParams { readonly targetId: string; }
 interface SnapshotQuery { readonly snapshotId?: unknown; }
@@ -143,6 +148,12 @@ function requireSnapshotId(query: SnapshotQuery): string {
   }
   return query.snapshotId.trim();
 }
+function requireIntentSnapshotId(body: UpdateIntentBody): string {
+  if (typeof body?.snapshotId !== 'string' || !body.snapshotId.trim()) {
+    throw new UpdateExecutionIntentError('INVALID_UPDATE_SNAPSHOT', 400, 'snapshotId is required.');
+  }
+  return body.snapshotId.trim();
+}
 function sendApiError(reply: FastifyReply, error: unknown): FastifyReply {
   if (
     error instanceof AuthError
@@ -156,6 +167,7 @@ function sendApiError(reply: FastifyReply, error: unknown): FastifyReply {
     || error instanceof UpdatePreflightError
     || error instanceof UpdatePlanError
     || error instanceof UpdateStrategyError
+    || error instanceof UpdateExecutionIntentError
   ) {
     return reply.code(error.statusCode).send({ error: { code: error.code, message: error.message } });
   }
@@ -223,6 +235,16 @@ export function buildServer(options: BuildServerOptions = {}): FastifyInstance {
     snapshotRepository,
     masterKey,
     auditService,
+  );
+  const updateExecutionIntent = new UpdateExecutionIntentService(
+    hostRepository,
+    credentialRepository,
+    targetRepository,
+    masterKey,
+    jobService,
+    auditService,
+    updatePlan,
+    updateStrategy,
   );
   const loginLimiter = new LoginLimiter();
   const app = Fastify({ logger: false });
@@ -355,6 +377,18 @@ export function buildServer(options: BuildServerOptions = {}): FastifyInstance {
     try {
       const session = requireAuthenticated(request);
       return reply.send(await updateStrategy.create(request.params.targetId, requireSnapshotId(request.query), session.userId));
+    } catch (error) { return sendApiError(reply, error); }
+  });
+
+  app.post<{ Params: TargetParams; Body: UpdateIntentBody }>('/api/v1/targets/:targetId/container/update-execution-intent', async (request, reply) => {
+    try {
+      const session = requireAuthenticatedMutation(request);
+      const intent = await updateExecutionIntent.create(
+        request.params.targetId,
+        requireIntentSnapshotId(request.body),
+        session.userId,
+      );
+      return reply.code(201).send({ intent });
     } catch (error) { return sendApiError(reply, error); }
   });
 
