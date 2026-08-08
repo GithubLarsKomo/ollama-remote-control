@@ -19,6 +19,7 @@ import {
   formatTemperature,
   formatTimestamp,
 } from './format.js';
+import UpdatePanel from './UpdatePanel.js';
 
 type AppPhase = 'loading' | 'bootstrap' | 'login' | 'authenticated' | 'fatal';
 
@@ -223,6 +224,7 @@ function Dashboard({ session, onSignedOut }: { readonly session: SessionView; re
   const [status, setStatus] = useState<TargetStatusResult | null>(null);
   const [catalogBusy, setCatalogBusy] = useState(true);
   const [statusBusy, setStatusBusy] = useState(false);
+  const [updateBusy, setUpdateBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [signingOut, setSigningOut] = useState(false);
 
@@ -299,7 +301,7 @@ function Dashboard({ session, onSignedOut }: { readonly session: SessionView; re
         </div>
         <div className="user-actions">
           <span>{session.user.username}</span>
-          <button className="secondary-button" disabled={signingOut} onClick={() => void logout()} type="button">
+          <button className="secondary-button" disabled={signingOut || updateBusy} onClick={() => void logout()} type="button">
             {signingOut ? 'Signing out…' : 'Sign out'}
           </button>
         </div>
@@ -308,15 +310,15 @@ function Dashboard({ session, onSignedOut }: { readonly session: SessionView; re
       <main className="dashboard">
         <section className="dashboard-header" aria-labelledby="dashboard-title">
           <div>
-            <p className="eyebrow">Read-only target overview</p>
+            <p className="eyebrow">Target operations overview</p>
             <h1 id="dashboard-title">Ollama status</h1>
-            <p className="muted">SSH, Docker and Ollama remain server-side. This dashboard only reads the application API.</p>
+            <p className="muted">SSH, Docker and Ollama remain server-side. Mutating workflows use server-issued plans and explicit confirmation.</p>
           </div>
           <div className="target-controls">
             <label>
               Target
               <select
-                disabled={catalogBusy || targets.length === 0}
+                disabled={catalogBusy || targets.length === 0 || updateBusy}
                 onChange={(event) => setSelectedTargetId(event.target.value)}
                 value={selectedTargetId}
               >
@@ -325,7 +327,7 @@ function Dashboard({ session, onSignedOut }: { readonly session: SessionView; re
             </label>
             <button
               className="secondary-button"
-              disabled={!selectedTargetId || statusBusy}
+              disabled={!selectedTargetId || statusBusy || updateBusy}
               onClick={() => void loadStatus(selectedTargetId)}
               type="button"
             >
@@ -361,6 +363,16 @@ function Dashboard({ session, onSignedOut }: { readonly session: SessionView; re
             <GpuCard status={status} />
             <StorageCard status={status} />
           </section>
+        ) : null}
+
+        {selectedTarget && status ? (
+          <UpdatePanel
+            key={selectedTarget.id}
+            onBusyChange={setUpdateBusy}
+            onSignedOut={onSignedOut}
+            onUpdated={() => loadStatus(selectedTarget.id)}
+            target={selectedTarget}
+          />
         ) : null}
       </main>
     </div>

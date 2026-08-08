@@ -84,6 +84,120 @@ export interface TargetStatusResult {
   };
 }
 
+export interface DockerUpdatePreflightMetadata {
+  readonly containerId: string;
+  readonly containerName: string;
+  readonly running: boolean;
+  readonly imageReference: string;
+  readonly imageId: string;
+  readonly repoDigests: readonly string[];
+  readonly restartPolicy: string;
+  readonly mountCount: number;
+  readonly portBindingCount: number;
+  readonly networkNames: readonly string[];
+  readonly gpuDeviceRequestCount: number;
+  readonly ollamaVersion: string | null;
+  readonly compose: {
+    readonly managed: boolean;
+    readonly project: string | null;
+    readonly service: string | null;
+    readonly configFiles: string | null;
+    readonly workingDir: string | null;
+  };
+}
+
+export interface PublicUpdateSnapshot {
+  readonly id: string;
+  readonly targetId: string;
+  readonly createdAt: string;
+  readonly metadata: DockerUpdatePreflightMetadata;
+}
+
+export interface DockerImagePlatform {
+  readonly os: string;
+  readonly architecture: string;
+  readonly variant: string | null;
+}
+
+export interface UpdatePlan {
+  readonly snapshotId: string;
+  readonly targetId: string;
+  readonly imageReference: string;
+  readonly pinned: boolean;
+  readonly currentDigest: string;
+  readonly candidateDigest: string;
+  readonly candidateIndexDigest: string | null;
+  readonly platform: DockerImagePlatform;
+  readonly updateAvailable: boolean;
+  readonly currentOllamaVersion: string | null;
+  readonly candidateImageVersion: string | null;
+  readonly composeManaged: boolean;
+  readonly modelVolumeBackup: {
+    readonly included: false;
+    readonly warning: string;
+  };
+}
+
+export interface ValidatedComposeStrategy {
+  readonly type: 'compose';
+  readonly executable: true;
+  readonly projectName: string;
+  readonly service: string;
+  readonly workingDirectory: string;
+  readonly configFiles: readonly string[];
+  readonly environmentFiles: readonly string[];
+  readonly composeVersion: string;
+  readonly containerId: string;
+}
+
+export interface StandaloneUpdateStrategy {
+  readonly type: 'standalone';
+  readonly executable: boolean;
+  readonly unsupportedFields: readonly string[];
+  readonly summary: {
+    readonly environmentCount: number;
+    readonly labelCount: number;
+    readonly mountCount: number;
+    readonly portBindingCount: number;
+    readonly networkNames: readonly string[];
+    readonly restartPolicy: string;
+    readonly hasCommandOverride: boolean;
+    readonly hasEntrypointOverride: boolean;
+  };
+}
+
+export interface UpdateStrategyResult {
+  readonly snapshotId: string;
+  readonly targetId: string;
+  readonly strategy: ValidatedComposeStrategy | StandaloneUpdateStrategy;
+}
+
+export interface UpdateExecutionIntent {
+  readonly intentVersion: 1;
+  readonly intentId: string;
+  readonly targetId: string;
+  readonly snapshotId: string;
+  readonly imageReference: string;
+  readonly currentDigest: string;
+  readonly candidateDigest: string;
+  readonly candidateIndexDigest: string | null;
+  readonly exactCandidateReference: string;
+  readonly candidateImageVersion: string | null;
+  readonly strategy: 'compose';
+  readonly composeService: string;
+  readonly createdAt: string;
+}
+
+export interface UpdateExecutionResult {
+  readonly jobId: string;
+  readonly outcome: 'updated';
+  readonly intentId: string;
+  readonly snapshotId: string;
+  readonly previousContainerId: string;
+  readonly containerId: string;
+  readonly candidateDigest: string;
+}
+
 export class ApiError extends Error {
   constructor(
     readonly status: number,
@@ -150,6 +264,18 @@ function csrfHeader(): Readonly<Record<string, string>> {
   return { 'x-csrf-token': token };
 }
 
+function mutationJson(value: unknown): Pick<RequestInit, 'body' | 'headers'> {
+  const json = jsonBody(value);
+  return {
+    body: json.body,
+    headers: { ...json.headers, ...csrfHeader() },
+  };
+}
+
+function targetPath(targetId: string): string {
+  return `/api/v1/targets/${encodeURIComponent(targetId)}`;
+}
+
 export const api = {
   setupStatus(): Promise<SetupStatus> {
     return requestJson<SetupStatus>('/api/v1/setup/status');
@@ -179,6 +305,42 @@ export const api = {
   },
 
   targetStatus(targetId: string): Promise<TargetStatusResult> {
-    return requestJson(`/api/v1/targets/${encodeURIComponent(targetId)}/status`);
+    return requestJson(`${targetPath(targetId)}/status`);
+  },
+
+  updatePreflight(targetId: string): Promise<{ readonly snapshot: PublicUpdateSnapshot }> {
+    return requestJson(`${targetPath(targetId)}/container/update-preflight`, {
+      method: 'POST',
+      headers: csrfHeader(),
+    });
+  },
+
+  updatePlan(targetId: string, snapshotId: string): Promise<{ readonly plan: UpdatePlan }> {
+    return requestJson(`${targetPath(targetId)}/container/update-plan?snapshotId=${encodeURIComponent(snapshotId)}`);
+  },
+
+  updateStrategy(targetId: string, snapshotId: string): Promise<UpdateStrategyResult> {
+    return requestJson(`${targetPath(targetId)}/container/update-strategy?snapshotId=${encodeURIComponent(snapshotId)}`);
+  },
+
+  createUpdateExecutionIntent(targetId: string, snapshotId: string): Promise<{ readonly intent: UpdateExecutionIntent }> {
+    return requestJson(`${targetPath(targetId)}/container/update-execution-intent`, {
+      method: 'POST',
+      ...mutationJson({ snapshotId }),
+    });
+  },
+
+  executeUpdate(targetId: string, intentId: string): Promise<{ readonly update: UpdateExecutionResult }> {
+    return requestJson(`${targetPath(targetId)}/container/update`, {
+      method: 'POST',
+      ...mutationJson({
+        intentId,
+        confirmation: {
+          action: 'update',
+          targetId,
+          intentId,
+        },
+      }),
+    });
   },
 };
