@@ -94,13 +94,14 @@ describe('bounded log buffer', () => {
   });
 
   it('drops oldest content to stay within the total character budget', () => {
-    const chunk = 'x'.repeat(Math.floor(MAX_LOG_BUFFER_CHARS / 2));
-    const bounded = appendBoundedLogEntries([], [
-      { id: 1, stream: 'stdout', chunk },
-      { id: 2, stream: 'stdout', chunk },
-      { id: 3, stream: 'stderr', chunk },
-    ]);
-    expect(bounded.map((entry) => entry.id)).toEqual([2, 3]);
+    const chunk = 'x'.repeat(60_000);
+    const entries: LogEntry[] = Array.from({ length: 17 }, (_, index) => ({
+      id: index + 1,
+      stream: index % 2 === 0 ? 'stdout' : 'stderr',
+      chunk,
+    }));
+    const bounded = appendBoundedLogEntries([], entries);
+    expect(bounded.map((entry) => entry.id)).toEqual(Array.from({ length: 16 }, (_, index) => index + 2));
     expect(bounded.reduce((sum, entry) => sum + entry.chunk.length, 0)).toBeLessThanOrEqual(MAX_LOG_BUFFER_CHARS);
   });
 
