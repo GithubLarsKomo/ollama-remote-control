@@ -7,6 +7,10 @@
     ".": {
       "types": "./dist/index.d.ts",
       "import": "./dist/index.js"
+    },
+    "./target-binding": {
+      "types": "./dist/target-binding.d.ts",
+      "import": "./dist/target-binding.js"
     }
   },
   "dependencies": {
