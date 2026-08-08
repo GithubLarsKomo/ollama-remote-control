@@ -52,7 +52,7 @@ interface ApiRoute {
 
 interface ResolvedTarget {
   readonly targetId: string;
-  readonly containerId: string;
+  readonly selectedContainerId: string;
   readonly connection: SshPrivateKeyConnection;
 }
 
@@ -86,6 +86,14 @@ function safeContainerIpv4(value: unknown): string | null {
   return address;
 }
 
+function normalizedContainerId(value: string): string {
+  const containerId = value.trim();
+  if (!/^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$/u.test(containerId)) {
+    throw new OllamaHealthError('INVALID_CONTAINER_ID', 400, 'Container identifier is invalid.');
+  }
+  return containerId;
+}
+
 export function selectOllamaApiRoute(containerInspect: Record<string, any>): ApiRoute | null {
   const bindings = containerInspect.HostConfig?.PortBindings?.['11434/tcp'];
   if (Array.isArray(bindings)) {
@@ -111,14 +119,14 @@ export function selectOllamaApiRoute(containerInspect: Record<string, any>): Api
   return null;
 }
 
-function parseInspect(stdout: string, containerId: string): Record<string, any> {
+function parseInspect(stdout: string): Record<string, any> {
   try {
     const parsed = JSON.parse(stdout);
     const object = Array.isArray(parsed) ? parsed[0] : null;
     if (!object || typeof object !== 'object') throw new Error('missing inspect object');
     return object as Record<string, any>;
   } catch {
-    throw new OllamaHealthError('DOCKER_OUTPUT_INVALID', 502, `Docker inspect for ${containerId} returned invalid data.`);
+    throw new OllamaHealthError('DOCKER_OUTPUT_INVALID', 502, 'Docker inspect returned invalid data.');
   }
 }
 
@@ -178,7 +186,7 @@ export class OllamaHealthService {
     }
     return {
       targetId: target.id,
-      containerId: target.selectedContainerId,
+      selectedContainerId: target.selectedContainerId,
       connection: {
         hostname: host.hostname,
         port: host.port,
@@ -189,8 +197,7 @@ export class OllamaHealthService {
     };
   }
 
-  async read(targetId: string): Promise<OllamaHealthResult> {
-    const target = this.resolve(targetId);
+  private async readResolved(target: ResolvedTarget, containerId: string): Promise<OllamaHealthResult> {
     const executor = (argv: readonly string[]) => execPrivateKey(
       target.connection,
       argv,
@@ -198,7 +205,7 @@ export class OllamaHealthService {
     );
 
     let inspectResult;
-    try { inspectResult = await executor(['docker', 'inspect', target.containerId]); }
+    try { inspectResult = await executor(['docker', 'inspect', containerId]); }
     catch (error) {
       if (error instanceof SshTransportError) {
         const status = error.code === 'SSH_HOST_KEY_MISMATCH' ? 409 : error.code === 'AUTH_FAILED' ? 422 : 502;
@@ -208,15 +215,15 @@ export class OllamaHealthService {
     }
     if (inspectResult.exitCode !== 0) {
       const detail = `${inspectResult.stderr}\n${inspectResult.stdout}`;
-      if (/no such (object|container)/iu.test(detail)) throw new OllamaHealthError('CONTAINER_NOT_FOUND', 404, 'Selected Ollama container was not found.');
+      if (/no such (object|container)/iu.test(detail)) throw new OllamaHealthError('CONTAINER_NOT_FOUND', 404, 'Ollama container was not found.');
       throw new OllamaHealthError('DOCKER_UNAVAILABLE', 502, 'Docker inspect failed.');
     }
-    const inspect = parseInspect(inspectResult.stdout, target.containerId);
+    const inspect = parseInspect(inspectResult.stdout);
     if (!Boolean(inspect.State?.Running)) {
-      throw new OllamaHealthError('CONTAINER_NOT_RUNNING', 409, 'Selected Ollama container is not running.');
+      throw new OllamaHealthError('CONTAINER_NOT_RUNNING', 409, 'Ollama container is not running.');
     }
 
-    const cliResult = await executor(['docker', 'exec', target.containerId, 'ollama', '--version']);
+    const cliResult = await executor(['docker', 'exec', containerId, 'ollama', '--version']);
     if (cliResult.exitCode !== 0) throw new OllamaHealthError('OLLAMA_CLI_ERROR', 502, 'Ollama CLI version lookup failed.');
     const cliVersion = parseCliVersion(cliResult.stdout);
 
@@ -248,5 +255,16 @@ export class OllamaHealthService {
       ollama: { cliVersion, apiReachable: true, apiVersion, versionMatch },
       transport: { mode: route.mode },
     };
+  }
+
+  async read(targetId: string): Promise<OllamaHealthResult> {
+    const target = this.resolve(targetId);
+    return this.readResolved(target, target.selectedContainerId);
+  }
+
+  async readContainer(targetId: string, containerId: string): Promise<OllamaHealthResult> {
+    const normalized = normalizedContainerId(containerId);
+    const target = this.resolve(targetId);
+    return this.readResolved(target, normalized);
   }
 }
