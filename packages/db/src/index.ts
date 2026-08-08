@@ -96,7 +96,8 @@ function mapHost(row: Record<string, unknown> | undefined): StoredHost | null {
   if (!row) return null;
   return { id: String(row.id), displayName: String(row.display_name), hostname: String(row.hostname), port: Number(row.port), username: String(row.username), hostKeyFingerprint: String(row.host_key_fingerprint), enabled: Number(row.enabled) === 1, createdAt: String(row.created_at), updatedAt: String(row.updated_at) };
 }
-function mapTarget(row: Record<string, unknown>): StoredOllamaTarget {
+function mapTarget(row: Record<string, unknown> | undefined): StoredOllamaTarget | null {
+  if (!row) return null;
   return { id: String(row.id), hostId: String(row.host_id), displayName: String(row.display_name), selectedContainerId: String(row.selected_container_id), containerNameOverride: row.container_name_override === null ? null : String(row.container_name_override), enabled: Number(row.enabled) === 1, createdAt: String(row.created_at), updatedAt: String(row.updated_at) };
 }
 function insertCredential(database: DatabaseConnection, credential: StoredSshCredential): void {
@@ -144,7 +145,10 @@ export class SqliteOllamaTargetRepository implements OllamaTargetRepository {
   saveSelection(target: StoredOllamaTarget): void {
     this.database.prepare(`INSERT INTO ollama_targets(id, host_id, display_name, container_name_override, selected_container_id, enabled, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(host_id, selected_container_id) WHERE selected_container_id IS NOT NULL DO UPDATE SET display_name = excluded.display_name, container_name_override = excluded.container_name_override, enabled = excluded.enabled, updated_at = excluded.updated_at`).run(target.id, target.hostId, target.displayName, target.containerNameOverride, target.selectedContainerId, target.enabled ? 1 : 0, target.createdAt, target.updatedAt);
   }
+  findById(targetId: string): StoredOllamaTarget | null {
+    return mapTarget(this.database.prepare(`SELECT id, host_id, display_name, container_name_override, selected_container_id, enabled, created_at, updated_at FROM ollama_targets WHERE id = ? AND selected_container_id IS NOT NULL`).get(targetId));
+  }
   findByHostId(hostId: string): readonly StoredOllamaTarget[] {
-    return this.database.prepare(`SELECT id, host_id, display_name, container_name_override, selected_container_id, enabled, created_at, updated_at FROM ollama_targets WHERE host_id = ? AND selected_container_id IS NOT NULL ORDER BY display_name, id`).all(hostId).map(mapTarget);
+    return this.database.prepare(`SELECT id, host_id, display_name, container_name_override, selected_container_id, enabled, created_at, updated_at FROM ollama_targets WHERE host_id = ? AND selected_container_id IS NOT NULL ORDER BY display_name, id`).all(hostId).map((row) => mapTarget(row)!).filter(Boolean);
   }
 }
