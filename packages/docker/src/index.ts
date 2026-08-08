@@ -4,7 +4,7 @@ export const DOCKER_ADAPTER_SCOPE = Object.freeze([
   'discover', 'inspect', 'logs', 'start', 'stop', 'restart', 'update', 'rollback',
 ] as const);
 
-export type DockerDiscoveryErrorCode = 'DOCKER_UNAVAILABLE' | 'DOCKER_OUTPUT_INVALID';
+export type DockerDiscoveryErrorCode = 'DOCKER_UNAVAILABLE' | 'DOCKER_OUTPUT_INVALID' | 'CONTAINER_NOT_FOUND';
 
 export class DockerDiscoveryError extends Error {
   constructor(readonly code: DockerDiscoveryErrorCode, message: string, options?: ErrorOptions) {
@@ -14,6 +14,28 @@ export class DockerDiscoveryError extends Error {
 
 export interface CommandExecutor {
   exec(argv: readonly string[]): Promise<RemoteExecResult>;
+}
+
+export interface DockerMount {
+  readonly source: string;
+  readonly destination: string;
+  readonly type: string;
+}
+
+export interface DockerContainerStatus {
+  readonly id: string;
+  readonly name: string;
+  readonly image: string;
+  readonly running: boolean;
+  readonly state: string;
+  readonly status: string;
+  readonly startedAt: string | null;
+  readonly restartCount: number;
+  readonly oomKilled: boolean;
+  readonly env: readonly string[];
+  readonly mounts: readonly DockerMount[];
+  readonly portBindings: Readonly<Record<string, unknown>>;
+  readonly labels: Readonly<Record<string, string>>;
 }
 
 export interface DockerContainerCandidate {
@@ -30,7 +52,7 @@ export interface DockerContainerCandidate {
     readonly image: string;
     readonly running: boolean;
     readonly env: readonly string[];
-    readonly mounts: readonly { source: string; destination: string; type: string }[];
+    readonly mounts: readonly DockerMount[];
     readonly portBindings: Readonly<Record<string, unknown>>;
     readonly labels: Readonly<Record<string, string>>;
   };
@@ -90,21 +112,78 @@ function parsePs(stdout: string): Required<PsRow>[] {
   }
 }
 
+function parseInspectObject(stdout: string, action: string): Record<string, any> {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(stdout);
+  } catch (error) {
+    throw new DockerDiscoveryError('DOCKER_OUTPUT_INVALID', `${action} output was invalid JSON.`, { cause: error as Error });
+  }
+  const item = Array.isArray(parsed) ? parsed[0] : null;
+  if (!item || typeof item !== 'object') {
+    throw new DockerDiscoveryError('DOCKER_OUTPUT_INVALID', `${action} returned no object.`);
+  }
+  return item as Record<string, any>;
+}
+
+function mountsFrom(object: Record<string, any>): DockerMount[] {
+  return Array.isArray(object.Mounts) ? object.Mounts.map((mount: any) => ({
+    source: String(mount?.Source ?? ''),
+    destination: String(mount?.Destination ?? ''),
+    type: String(mount?.Type ?? ''),
+  })) : [];
+}
+
+function labelsFrom(object: Record<string, any>): Record<string, string> {
+  const labelsValue = object.Config?.Labels && typeof object.Config.Labels === 'object' ? object.Config.Labels : {};
+  const labels: Record<string, string> = {};
+  for (const [key, value] of Object.entries(labelsValue)) labels[key] = String(value);
+  return labels;
+}
+
 function inspectCandidate(value: unknown): DockerContainerCandidate['inspect'] {
   const item = Array.isArray(value) ? value[0] : null;
   if (!item || typeof item !== 'object') throw new DockerDiscoveryError('DOCKER_OUTPUT_INVALID', 'Docker inspect returned no object.');
   const object = item as Record<string, any>;
-  const mounts = Array.isArray(object.Mounts) ? object.Mounts.map((mount: any) => ({
-    source: String(mount?.Source ?? ''), destination: String(mount?.Destination ?? ''), type: String(mount?.Type ?? ''),
-  })) : [];
-  const labelsValue = object.Config?.Labels && typeof object.Config.Labels === 'object' ? object.Config.Labels : {};
-  const labels: Record<string, string> = {};
-  for (const [key, val] of Object.entries(labelsValue)) labels[key] = String(val);
   return {
-    image: String(object.Config?.Image ?? ''), running: Boolean(object.State?.Running),
-    env: Array.isArray(object.Config?.Env) ? object.Config.Env.map(String) : [], mounts,
+    image: String(object.Config?.Image ?? ''),
+    running: Boolean(object.State?.Running),
+    env: Array.isArray(object.Config?.Env) ? object.Config.Env.map(String) : [],
+    mounts: mountsFrom(object),
     portBindings: object.HostConfig?.PortBindings && typeof object.HostConfig.PortBindings === 'object' ? object.HostConfig.PortBindings : {},
-    labels,
+    labels: labelsFrom(object),
+  };
+}
+
+export async function inspectDockerContainer(
+  executor: CommandExecutor,
+  containerId: string,
+): Promise<DockerContainerStatus> {
+  const result = await executor.exec(['docker', 'inspect', containerId]);
+  if (result.exitCode !== 0) {
+    const detail = result.stderr.trim() || result.stdout.trim();
+    if (/no such (object|container)/iu.test(detail)) {
+      throw new DockerDiscoveryError('CONTAINER_NOT_FOUND', `Docker container ${containerId} was not found.`);
+    }
+    throw new DockerDiscoveryError('DOCKER_UNAVAILABLE', `docker inspect failed: ${detail || 'unknown Docker error'}`);
+  }
+  const object = parseInspectObject(result.stdout, 'docker inspect');
+  const state = object.State && typeof object.State === 'object' ? object.State : {};
+  const health = state.Health && typeof state.Health === 'object' ? state.Health : null;
+  return {
+    id: String(object.Id ?? containerId),
+    name: String(object.Name ?? '').replace(/^\//u, ''),
+    image: String(object.Config?.Image ?? ''),
+    running: Boolean(state.Running),
+    state: String(state.Status ?? ''),
+    status: health?.Status ? String(health.Status) : String(state.Status ?? ''),
+    startedAt: state.StartedAt ? String(state.StartedAt) : null,
+    restartCount: Number(object.RestartCount ?? 0),
+    oomKilled: Boolean(state.OOMKilled),
+    env: Array.isArray(object.Config?.Env) ? object.Config.Env.map(String) : [],
+    mounts: mountsFrom(object),
+    portBindings: object.HostConfig?.PortBindings && typeof object.HostConfig.PortBindings === 'object' ? object.HostConfig.PortBindings : {},
+    labels: labelsFrom(object),
   };
 }
 
