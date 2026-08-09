@@ -1,5 +1,3 @@
-import { createHash } from 'node:crypto';
-
 export type ModelfileDirectiveName =
   | 'FROM'
   | 'PARAMETER'
@@ -75,7 +73,6 @@ export type ModelfileNode =
 
 export interface ParsedModelfile {
   readonly raw: string;
-  readonly contentSha256: string;
   readonly lineEnding: '\n' | '\r\n' | 'mixed' | 'none';
   readonly nodes: readonly ModelfileNode[];
   readonly diagnostics: readonly ModelfileDiagnostic[];
@@ -102,6 +99,7 @@ const MAX_RAW_BYTES = 512 * 1024;
 const MAX_NODES = 20_000;
 const MAX_DIAGNOSTICS = 256;
 const DIRECTIVE_PATTERN = /^(\s*)([A-Za-z][A-Za-z0-9_-]*)([ \t]*)(.*)$/u;
+const UTF8 = new TextEncoder();
 
 interface PhysicalLine {
   readonly start: number;
@@ -112,8 +110,8 @@ interface PhysicalLine {
   readonly content: string;
 }
 
-function sha256(raw: string): string {
-  return createHash('sha256').update(raw, 'utf8').digest('hex');
+function utf8Bytes(value: string): number {
+  return UTF8.encode(value).byteLength;
 }
 
 function positionAt(lines: readonly PhysicalLine[], offset: number): ModelfileSourcePosition {
@@ -262,7 +260,7 @@ function structuredEditable(name: ModelfileDirectiveName, multilineBalanced: boo
 export function parseModelfile(raw: string): ParsedModelfile {
   if (typeof raw !== 'string') throw new TypeError('Modelfile source must be text.');
   if (raw.includes('\u0000')) throw new Error('Modelfile source must not contain NUL characters.');
-  if (Buffer.byteLength(raw, 'utf8') > MAX_RAW_BYTES) throw new Error(`Modelfile source exceeds ${MAX_RAW_BYTES} UTF-8 bytes.`);
+  if (utf8Bytes(raw) > MAX_RAW_BYTES) throw new Error(`Modelfile source exceeds ${MAX_RAW_BYTES} UTF-8 bytes.`);
 
   const lines = splitPhysicalLines(raw);
   const nodes: ModelfileNode[] = [];
@@ -399,7 +397,6 @@ export function parseModelfile(raw: string): ParsedModelfile {
 
   return {
     raw,
-    contentSha256: sha256(raw),
     lineEnding: detectedLineEnding(raw),
     nodes,
     diagnostics,
@@ -426,7 +423,7 @@ export function replaceDirectiveArgument(
   if (node.kind !== 'directive' || !node.structuredEditable) {
     throw new Error('Directive node is not safe for structured editing.');
   }
-  if (Buffer.byteLength(nextArgument, 'utf8') > MAX_RAW_BYTES) {
+  if (utf8Bytes(nextArgument) > MAX_RAW_BYTES) {
     throw new Error('Replacement directive argument is too large.');
   }
   const start = node.argumentRange.start.offset;
