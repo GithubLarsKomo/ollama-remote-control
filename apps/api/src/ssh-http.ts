@@ -7,6 +7,7 @@ export type SshHttpErrorCode =
   | 'SSH_HOST_KEY_MISMATCH'
   | 'SSH_CONNECT_FAILED'
   | 'SSH_FORWARD_FAILED'
+  | 'HTTP_REQUEST_INVALID'
   | 'HTTP_TIMEOUT'
   | 'HTTP_RESPONSE_TOO_LARGE'
   | 'HTTP_RESPONSE_INVALID';
@@ -29,6 +30,7 @@ export interface SshHttpOptions {
 }
 
 export type OllamaReadPath = '/api/version' | '/api/tags' | '/api/ps';
+const OLLAMA_READ_PATHS = new Set<string>(['/api/version', '/api/tags', '/api/ps']);
 
 function fingerprintSha256(key: Buffer): string {
   return `SHA256:${createHash('sha256').update(key).digest('base64').replace(/=+$/u, '')}`;
@@ -103,10 +105,13 @@ export async function httpGetViaPinnedSsh(
 ): Promise<SshHttpResponse> {
   const timeoutMs = options.timeoutMs ?? 5_000;
   const maxResponseBytes = options.maxResponseBytes ?? 64 * 1024;
+  if (!OLLAMA_READ_PATHS.has(requestPath)) {
+    throw new SshHttpError('HTTP_REQUEST_INVALID', 'Ollama HTTP request path is not allowed.');
+  }
   if (!Number.isInteger(destinationPort) || destinationPort < 1 || destinationPort > 65535) {
     throw new SshHttpError('SSH_FORWARD_FAILED', 'SSH forward destination port is invalid.');
   }
-  if (!destinationHost || destinationHost.length > 255) {
+  if (!destinationHost || destinationHost.length > 255 || /[\u0000-\u0020\u007f]/u.test(destinationHost)) {
     throw new SshHttpError('SSH_FORWARD_FAILED', 'SSH forward destination host is invalid.');
   }
   if (!Number.isInteger(timeoutMs) || timeoutMs < 100 || timeoutMs > 60_000) {
