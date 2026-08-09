@@ -21,6 +21,7 @@ import {
 } from './format.js';
 import LifecyclePanel from './LifecyclePanel.js';
 import LiveLogsPanel from './LiveLogsPanel.js';
+import ModelsPanel from './ModelsPanel.js';
 import OnboardingPanel from './OnboardingPanel.js';
 import UpdatePanel from './UpdatePanel.js';
 
@@ -383,6 +384,15 @@ function Dashboard({ session, onSignedOut }: { readonly session: SessionView; re
             <GpuCard status={status} />
             <StorageCard status={status} />
           </section>
+        ) : null}
+
+        {status && status.target.id === selectedTargetId ? (
+          <ModelsPanel
+            disabled={operationBusy || statusBusy || catalogBusy}
+            key={`models:${status.target.id}:${status.target.selectedContainerId}:${status.container.startedAt ?? 'stopped'}`}
+            onSignedOut={onSignedOut}
+            status={status}
+          />
         ) : null}
 
         {status && status.target.id === selectedTargetId ? (
