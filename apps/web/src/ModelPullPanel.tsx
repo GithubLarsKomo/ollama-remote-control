@@ -100,7 +100,7 @@ export default function ModelPullPanel({ targetId, disabled, onSignedOut, onSucc
   const terminal = state.job ? isTerminalPullState(state.job.state) : false;
 
   useEffect(() => {
-    if (!jobId || terminal) return undefined;
+    if (!jobId) return undefined;
     eventSourceRef.current?.close();
     const source = new EventSource(modelPullEventUrl(jobId), { withCredentials: true });
     eventSourceRef.current = source;
@@ -137,7 +137,7 @@ export default function ModelPullPanel({ targetId, disabled, onSignedOut, onSucc
       source.close();
       if (eventSourceRef.current === source) eventSourceRef.current = null;
     };
-  }, [jobId, onSucceeded, terminal]);
+  }, [jobId, onSucceeded]);
 
   async function submit(event: FormEvent<HTMLFormElement>): Promise<void> {
     event.preventDefault();
@@ -174,6 +174,8 @@ export default function ModelPullPanel({ targetId, disabled, onSignedOut, onSucc
 
   function clearTerminal(): void {
     if (!terminal) return;
+    eventSourceRef.current?.close();
+    eventSourceRef.current = null;
     setState(EMPTY_STATE);
     setError(null);
     setStreamNotice(null);
