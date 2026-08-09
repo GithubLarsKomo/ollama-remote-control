@@ -9,9 +9,12 @@ import {
 
 const SINGLETON_DIRECTIVES = new Set<ModelfileDirectiveName>([
   'FROM',
+  'DRAFT',
   'TEMPLATE',
   'SYSTEM',
   'LICENSE',
+  'RENDERER',
+  'PARSER',
   'REQUIRES',
 ]);
 
@@ -42,7 +45,7 @@ function endsWithLineEnding(raw: string): boolean {
 }
 
 function assertKnownDirective(name: string): asserts name is ModelfileDirectiveName {
-  if (!['FROM', 'PARAMETER', 'TEMPLATE', 'SYSTEM', 'ADAPTER', 'LICENSE', 'MESSAGE', 'REQUIRES'].includes(name)) {
+  if (!['FROM', 'DRAFT', 'PARAMETER', 'TEMPLATE', 'SYSTEM', 'ADAPTER', 'LICENSE', 'MESSAGE', 'RENDERER', 'PARSER', 'REQUIRES'].includes(name)) {
     throw new Error('Unknown Modelfile directive cannot be added through the structured editor.');
   }
 }
@@ -68,7 +71,7 @@ export function appendDirective(
   if (SINGLETON_DIRECTIVES.has(nameValue) && directiveNodes(parsed, nameValue).length > 0) {
     throw new Error(`${nameValue} already exists and cannot be appended as a duplicate singleton directive.`);
   }
-  if (['PARAMETER', 'MESSAGE'].includes(nameValue) && /[\r\n]/u.test(argument)) {
+  if (['PARAMETER', 'MESSAGE', 'DRAFT', 'RENDERER', 'PARSER'].includes(nameValue) && /[\r\n]/u.test(argument)) {
     throw new Error(`${nameValue} structured input must remain single-line; use Raw view for multiline syntax.`);
   }
   const ending = preferredLineEnding(parsed);
