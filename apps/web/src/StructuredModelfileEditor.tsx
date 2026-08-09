@@ -23,6 +23,8 @@ interface StructuredModelfileEditorProps {
   readonly onChange: (nextRaw: string) => void;
 }
 
+type SimpleDirectiveName = Extract<ModelfileDirectiveName, 'FROM' | 'DRAFT' | 'RENDERER' | 'PARSER' | 'REQUIRES'>;
+
 function diagnosticLabel(diagnostic: ModelfileDiagnostic): string {
   return `L${diagnostic.range.start.line}:${diagnostic.range.start.column} · ${diagnostic.code} · ${diagnostic.message}`;
 }
@@ -34,6 +36,14 @@ function safePatch(
   try { onChange(apply().raw); } catch { /* parser diagnostics keep raw editing available */ }
 }
 
+function defaultSimpleArgument(name: SimpleDirectiveName): string {
+  if (name === 'FROM') return 'model:latest';
+  if (name === 'DRAFT') return 'draft-model:latest';
+  if (name === 'RENDERER') return 'renderer-name';
+  if (name === 'PARSER') return 'parser-name';
+  return 'ollama >= 0.0.0';
+}
+
 function SimpleDirective({
   parsed,
   name,
@@ -41,7 +51,7 @@ function SimpleDirective({
   onChange,
 }: {
   readonly parsed: ParsedModelfile;
-  readonly name: 'FROM' | 'REQUIRES';
+  readonly name: SimpleDirectiveName;
   readonly disabled: boolean;
   readonly onChange: (nextRaw: string) => void;
 }) {
@@ -54,7 +64,7 @@ function SimpleDirective({
           <button
             className="secondary-button"
             disabled={disabled}
-            onClick={() => safePatch(() => appendDirective(parsed, name, name === 'FROM' ? 'model:latest' : 'ollama >= 0.0.0'), onChange)}
+            onClick={() => safePatch(() => appendDirective(parsed, name, defaultSimpleArgument(name)), onChange)}
             type="button"
           >
             Add {name}
@@ -278,6 +288,9 @@ export default function StructuredModelfileEditor({ raw, disabled, onChange }: S
 
       <div className="structured-editor-grid">
         <SimpleDirective parsed={parsed} name="FROM" disabled={disabled} onChange={onChange} />
+        <SimpleDirective parsed={parsed} name="DRAFT" disabled={disabled} onChange={onChange} />
+        <SimpleDirective parsed={parsed} name="RENDERER" disabled={disabled} onChange={onChange} />
+        <SimpleDirective parsed={parsed} name="PARSER" disabled={disabled} onChange={onChange} />
         <SimpleDirective parsed={parsed} name="REQUIRES" disabled={disabled} onChange={onChange} />
         <KeyValueDirectives parsed={parsed} name="PARAMETER" disabled={disabled} onChange={onChange} />
         <AdapterDirectives parsed={parsed} disabled={disabled} onChange={onChange} />
