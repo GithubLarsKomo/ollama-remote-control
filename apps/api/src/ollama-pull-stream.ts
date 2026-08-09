@@ -303,7 +303,7 @@ export async function streamOllamaPullViaPinnedSsh(
 
         const requestBody = JSON.stringify({ model, stream: true });
         const hostHeader = destinationHost.includes(':') ? `[${destinationHost}]:${destinationPort}` : `${destinationHost}:${destinationPort}`;
-        stream.end([
+        stream.write([
           'POST /api/pull HTTP/1.1',
           `Host: ${hostHeader}`,
           'Accept: application/x-ndjson, application/json',
