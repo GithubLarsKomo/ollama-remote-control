@@ -53,6 +53,7 @@ const migrations: readonly Migration[] = [
   { version: 6, name: 'jobs-audit', source: new URL('../migrations/0006_jobs_audit.sql', import.meta.url) },
   { version: 7, name: 'update-snapshots', source: new URL('../migrations/0007_update_snapshots.sql', import.meta.url) },
   { version: 8, name: 'modelfile-library', source: new URL('../migrations/0008_modelfile_library.sql', import.meta.url) },
+  { version: 9, name: 'modelfile-deploy-plans', source: new URL('../migrations/0009_modelfile_deploy_plans.sql', import.meta.url) },
 ];
 
 export function openDatabase(filename: string): DatabaseConnection {
@@ -167,7 +168,7 @@ function mapUpdateSnapshot(row: Record<string, unknown> | undefined): StoredUpda
 }
 function insertCredential(database: DatabaseConnection, credential: StoredSshCredential): void {
   const encrypted = credential.encryptedPrivateKey;
-  database.prepare(`INSERT INTO ssh_credentials(id, host_id, algorithm, key_version, nonce, ciphertext, auth_tag, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(credential.id, credential.hostId, encrypted.algorithm, encrypted.keyVersion, encrypted.nonce, encrypted.ciphertext, encrypted.authTag, credential.createdAt, credential.updatedAt);
+  database.prepare(`INSERT INTO ssh_credentials(id, host_id, algorithm, key_version, nonce, ciphertext, auth_tag, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(credential.id, credential.hostId, encrypted.algorithm, encrypted.keyVersion, encrypted.nonce, encrypted.ciphertext, encrypted.authTag, encrypted.createdAt, encrypted.updatedAt);
 }
 function nextJobEventSequence(database: DatabaseConnection, jobId: string): number {
   return Number(database.prepare('SELECT COALESCE(MAX(sequence), 0) + 1 AS sequence FROM job_events WHERE job_id = ?').get(jobId)?.sequence ?? 1);
