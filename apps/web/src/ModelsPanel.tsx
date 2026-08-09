@@ -9,6 +9,7 @@ import {
   type TargetStatusResult,
 } from './api.js';
 import { formatBytes, formatTimestamp } from './format.js';
+import ModelDetailsPanel from './ModelDetailsPanel.js';
 import {
   fetchModelInventory,
   runningModelDigests,
@@ -57,6 +58,7 @@ function RunningModelCard({ model }: { readonly model: RunningModelView }) {
 
 export default function ModelsPanel({ status, disabled, onSignedOut }: ModelsPanelProps) {
   const [inventory, setInventory] = useState<ModelInventoryView | null>(null);
+  const [selectedModel, setSelectedModel] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -65,13 +67,16 @@ export default function ModelsPanel({ status, disabled, onSignedOut }: ModelsPan
     setBusy(true);
     setError(null);
     try {
-      setInventory(await fetchModelInventory(status.target.id));
+      const next = await fetchModelInventory(status.target.id);
+      setInventory(next);
+      setSelectedModel((current) => current && next.installed.some((model) => model.model === current) ? current : null);
     } catch (loadError) {
       if (loadError instanceof ApiError && loadError.status === 401) {
         onSignedOut();
         return;
       }
       setInventory(null);
+      setSelectedModel(null);
       setError(errorMessage(loadError));
     } finally {
       setBusy(false);
@@ -81,6 +86,7 @@ export default function ModelsPanel({ status, disabled, onSignedOut }: ModelsPan
   useEffect(() => {
     if (!status.container.running) {
       setInventory(null);
+      setSelectedModel(null);
       setError(null);
       return;
     }
@@ -151,6 +157,7 @@ export default function ModelsPanel({ status, disabled, onSignedOut }: ModelsPan
                     <th>Family</th>
                     <th>Modified</th>
                     <th>State</th>
+                    <th>Details</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -166,12 +173,33 @@ export default function ModelsPanel({ status, disabled, onSignedOut }: ModelsPan
                       <td>{display(model.details.family)}</td>
                       <td>{model.modifiedAt ? formatTimestamp(model.modifiedAt) : 'Unavailable'}</td>
                       <td>{loadedDigests.has(model.digest) ? <span className="model-loaded-badge">Loaded</span> : <span className="status-pill status-muted">Idle</span>}</td>
+                      <td>
+                        <button
+                          className="secondary-button model-detail-button"
+                          disabled={disabled || busy}
+                          onClick={() => setSelectedModel(model.model)}
+                          type="button"
+                        >
+                          {selectedModel === model.model ? 'Selected' : 'Details'}
+                        </button>
+                      </td>
                     </tr>
                   ))}
                 </tbody>
               </table>
             </div>
           )}
+
+          {selectedModel ? (
+            <ModelDetailsPanel
+              disabled={disabled || busy}
+              key={`${status.target.id}:${status.target.selectedContainerId}:${status.container.startedAt ?? 'stopped'}:${selectedModel}`}
+              modelName={selectedModel}
+              onClose={() => setSelectedModel(null)}
+              onSignedOut={onSignedOut}
+              targetId={status.target.id}
+            />
+          ) : null}
 
           <div className="models-section-heading models-running-heading">
             <div>
