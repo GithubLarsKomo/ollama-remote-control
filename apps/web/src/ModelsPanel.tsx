@@ -9,6 +9,7 @@ import {
   type TargetStatusResult,
 } from './api.js';
 import { formatBytes, formatTimestamp } from './format.js';
+import LocalModelfilesPanel from './LocalModelfilesPanel.js';
 import ModelDetailsPanel from './ModelDetailsPanel.js';
 import {
   fetchModelInventory,
@@ -214,6 +215,13 @@ export default function ModelsPanel({ status, disabled, onSignedOut }: ModelsPan
               {inventory.running.map((model) => <RunningModelCard key={`${model.digest}:${model.model}`} model={model} />)}
             </div>
           )}
+
+          <LocalModelfilesPanel
+            disabled={disabled || busy}
+            inventory={inventory}
+            onSignedOut={onSignedOut}
+            status={status}
+          />
         </>
       ) : null}
     </section>
