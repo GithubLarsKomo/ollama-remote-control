@@ -67,6 +67,10 @@ import {
   OllamaHealthService,
 } from './ollama-health.js';
 import {
+  OllamaModelDetailError,
+  OllamaModelDetailService,
+} from './ollama-model-details.js';
+import {
   OllamaModelInventoryError,
   OllamaModelInventoryService,
 } from './ollama-models.js';
@@ -136,6 +140,7 @@ interface HostParams { readonly hostId: string; }
 interface TargetParams { readonly targetId: string; }
 interface JobParams { readonly jobId: string; }
 interface SnapshotQuery { readonly snapshotId?: unknown; }
+interface ModelDetailQuery { readonly model?: unknown; }
 interface LogQuery { readonly tail?: unknown; }
 interface PullEventQuery { readonly after?: unknown; }
 interface LoginBucket { failures: number; resetAt: number; }
@@ -196,6 +201,7 @@ function sendApiError(reply: FastifyReply, error: unknown): FastifyReply {
     || error instanceof ModelPullError
     || error instanceof PullJobEventError
     || error instanceof OllamaHealthError
+    || error instanceof OllamaModelDetailError
     || error instanceof OllamaModelInventoryError
     || error instanceof ContainerLifecycleError
     || error instanceof JobServiceError
@@ -244,6 +250,7 @@ export function buildServer(options: BuildServerOptions = {}): FastifyInstance {
   const targetLogs = new TargetLogService(hostRepository, credentialRepository, targetRepository, masterKey);
   const ollamaHealth = new OllamaHealthService(hostRepository, credentialRepository, targetRepository, masterKey);
   const ollamaModels = new OllamaModelInventoryService(hostRepository, credentialRepository, targetRepository, masterKey);
+  const ollamaModelDetails = new OllamaModelDetailService(hostRepository, credentialRepository, targetRepository, masterKey);
   const modelPull = new ModelPullService(
     hostRepository,
     credentialRepository,
@@ -435,6 +442,12 @@ export function buildServer(options: BuildServerOptions = {}): FastifyInstance {
       return reply.send(await ollamaModels.read(request.params.targetId));
     } catch (error) { return sendApiError(reply, error); }
   });
+  app.get<{ Params: TargetParams; Querystring: ModelDetailQuery }>('/api/v1/targets/:targetId/model-details', async (request, reply) => {
+    try {
+      requireAuthenticated(request);
+      return reply.send(await ollamaModelDetails.read(request.params.targetId, request.query?.model));
+    } catch (error) { return sendApiError(reply, error); }
+  });
   app.post<{ Params: TargetParams; Body: ModelPullBody }>('/api/v1/targets/:targetId/models/pull', async (request, reply) => {
     try {
       const session = requireAuthenticatedMutation(request);
@@ -603,7 +616,10 @@ export function buildServer(options: BuildServerOptions = {}): FastifyInstance {
     remoteStream.start();
   });
 
-  app.addHook('onClose', async () => { database.close(); });
+  app.addHook('onClose', async () => {
+    await modelPull.shutdown();
+    database.close();
+  });
   return app;
 }
 
