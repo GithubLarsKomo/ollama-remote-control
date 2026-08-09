@@ -1,11 +1,14 @@
 export type ModelfileDirectiveName =
   | 'FROM'
+  | 'DRAFT'
   | 'PARAMETER'
   | 'TEMPLATE'
   | 'SYSTEM'
   | 'ADAPTER'
   | 'LICENSE'
   | 'MESSAGE'
+  | 'RENDERER'
+  | 'PARSER'
   | 'REQUIRES';
 
 export type ModelfileDiagnosticSeverity = 'error' | 'warning' | 'info';
@@ -86,15 +89,19 @@ export interface ModelfilePatchResult {
 
 const KNOWN_DIRECTIVES = new Set<ModelfileDirectiveName>([
   'FROM',
+  'DRAFT',
   'PARAMETER',
   'TEMPLATE',
   'SYSTEM',
   'ADAPTER',
   'LICENSE',
   'MESSAGE',
+  'RENDERER',
+  'PARSER',
   'REQUIRES',
 ]);
 
+const SINGLE_LINE_DIRECTIVES = new Set<ModelfileDirectiveName>(['DRAFT', 'RENDERER', 'PARSER']);
 const MAX_RAW_BYTES = 512 * 1024;
 const MAX_NODES = 20_000;
 const MAX_DIAGNOSTICS = 256;
@@ -225,6 +232,16 @@ function validateKnownDirective(
     return;
   }
 
+  if (SINGLE_LINE_DIRECTIVES.has(node.name) && node.multiline) {
+    diagnostic(
+      diagnostics,
+      'error',
+      'DIRECTIVE_SINGLE_LINE_REQUIRED',
+      `${node.name} must remain a single-line value for structured editing.`,
+      node.argumentRange,
+    );
+  }
+
   if (node.name === 'PARAMETER') {
     const match = /^(\S+)[ \t]+(.+)$/su.exec(argument);
     if (!match || !match[2]!.trim()) {
@@ -252,8 +269,9 @@ function validateKnownDirective(
   }
 }
 
-function structuredEditable(name: ModelfileDirectiveName, multilineBalanced: boolean): boolean {
+function structuredEditable(name: ModelfileDirectiveName, multilineBalanced: boolean, multiline: boolean): boolean {
   if (!multilineBalanced) return false;
+  if (SINGLE_LINE_DIRECTIVES.has(name) && multiline) return false;
   return KNOWN_DIRECTIVES.has(name);
 }
 
@@ -339,6 +357,7 @@ export function parseModelfile(raw: string): ParsedModelfile {
 
     if (isKnown) {
       const name = normalizedName as ModelfileDirectiveName;
+      const multiline = endLineIndex > index;
       const node: ModelfileDirectiveNode = {
         kind: 'directive',
         id: nodeId(`directive:${name}`, first.start, nodeEnd),
@@ -348,8 +367,8 @@ export function parseModelfile(raw: string): ParsedModelfile {
         originalName,
         argument,
         argumentRange: range(lines, argumentStart, argumentEnd),
-        multiline: endLineIndex > index,
-        structuredEditable: structuredEditable(name, multilineBalanced),
+        multiline,
+        structuredEditable: structuredEditable(name, multilineBalanced, multiline),
       };
       nodes.push(node);
       validateKnownDirective(node, diagnostics);
