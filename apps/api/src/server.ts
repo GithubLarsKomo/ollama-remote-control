@@ -62,6 +62,10 @@ import {
   OllamaHealthError,
   OllamaHealthService,
 } from './ollama-health.js';
+import {
+  OllamaModelInventoryError,
+  OllamaModelInventoryService,
+} from './ollama-models.js';
 import { publicDockerDiscovery } from './public-discovery.js';
 import {
   TargetStatusError,
@@ -178,6 +182,7 @@ function sendApiError(reply: FastifyReply, error: unknown): FastifyReply {
     || error instanceof TargetStatusError
     || error instanceof TargetLogError
     || error instanceof OllamaHealthError
+    || error instanceof OllamaModelInventoryError
     || error instanceof ContainerLifecycleError
     || error instanceof JobServiceError
     || error instanceof UpdatePreflightError
@@ -224,6 +229,7 @@ export function buildServer(options: BuildServerOptions = {}): FastifyInstance {
   const targetStatus = new TargetStatusService(hostRepository, credentialRepository, targetRepository, masterKey);
   const targetLogs = new TargetLogService(hostRepository, credentialRepository, targetRepository, masterKey);
   const ollamaHealth = new OllamaHealthService(hostRepository, credentialRepository, targetRepository, masterKey);
+  const ollamaModels = new OllamaModelInventoryService(hostRepository, credentialRepository, targetRepository, masterKey);
   const updateRemoteFactory = options.updateRemoteFactory ?? createSshUpdateRemoteFactory(ollamaHealth);
   const containerLifecycle = new ContainerLifecycleService(
     hostRepository,
@@ -396,6 +402,12 @@ export function buildServer(options: BuildServerOptions = {}): FastifyInstance {
     try {
       requireAuthenticated(request);
       return reply.send(await ollamaHealth.read(request.params.targetId));
+    } catch (error) { return sendApiError(reply, error); }
+  });
+  app.get<{ Params: TargetParams }>('/api/v1/targets/:targetId/models', async (request, reply) => {
+    try {
+      requireAuthenticated(request);
+      return reply.send(await ollamaModels.read(request.params.targetId));
     } catch (error) { return sendApiError(reply, error); }
   });
 
