@@ -8,6 +8,10 @@
       "types": "./dist/index.d.ts",
       "import": "./dist/index.js"
     },
+    "./modelfile-parser": {
+      "types": "./dist/modelfile-parser.d.ts",
+      "import": "./dist/modelfile-parser.js"
+    },
     "./modelfiles": {
       "types": "./dist/modelfiles.d.ts",
       "import": "./dist/modelfiles.js"
