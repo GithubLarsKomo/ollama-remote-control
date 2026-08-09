@@ -35,6 +35,44 @@ export interface ModelInventoryView {
   readonly running: readonly RunningModelView[];
 }
 
+export type ProvenanceReferenceKind = 'model-reference' | 'local-artifact' | 'unknown';
+
+export interface ProvenanceReferencePreview {
+  readonly reference: string;
+  readonly kind: ProvenanceReferenceKind;
+}
+
+export interface ModelDetailView {
+  readonly targetId: string;
+  readonly transport: { readonly mode: 'published-binding' | 'container-network' };
+  readonly identity: {
+    readonly name: string;
+    readonly model: string;
+    readonly digest: string;
+    readonly modifiedAt: string | null;
+  };
+  readonly details: ModelDetailsView & { readonly parentModel: string | null };
+  readonly capabilities: readonly string[];
+  readonly modelfile: string | null;
+  readonly parameters: string | null;
+  readonly template: string | null;
+  readonly system: string | null;
+  readonly license: string | null;
+  readonly requires: string | null;
+  readonly architecture: {
+    readonly architecture: string | null;
+    readonly parameterCount: number | null;
+    readonly contextLength: number | null;
+    readonly embeddingLength: number | null;
+    readonly blockCount: number | null;
+    readonly quantizationVersion: number | null;
+  };
+  readonly provenancePreview: {
+    readonly from: ProvenanceReferencePreview | null;
+    readonly adapters: readonly ProvenanceReferencePreview[];
+  };
+}
+
 function isApiErrorPayload(value: unknown): value is { readonly error: { readonly code: string; readonly message: string } } {
   if (!value || typeof value !== 'object') return false;
   const error = (value as { error?: unknown }).error;
@@ -46,6 +84,15 @@ function isApiErrorPayload(value: unknown): value is { readonly error: { readonl
   );
 }
 
+async function safeJsonError(response: Response, fallbackCode: string, fallbackMessage: string): Promise<never> {
+  let payload: unknown = null;
+  try { payload = await response.json(); } catch { /* safe generic error below */ }
+  if (isApiErrorPayload(payload)) {
+    throw new ApiError(response.status, payload.error.code, payload.error.message);
+  }
+  throw new ApiError(response.status, fallbackCode, fallbackMessage);
+}
+
 export async function fetchModelInventory(targetId: string): Promise<ModelInventoryView> {
   const response = await fetch(`/api/v1/targets/${encodeURIComponent(targetId)}/models`, {
     method: 'GET',
@@ -53,12 +100,20 @@ export async function fetchModelInventory(targetId: string): Promise<ModelInvent
     headers: { accept: 'application/json' },
   });
   if (response.ok) return await response.json() as ModelInventoryView;
-  let payload: unknown = null;
-  try { payload = await response.json(); } catch { /* safe generic error below */ }
-  if (isApiErrorPayload(payload)) {
-    throw new ApiError(response.status, payload.error.code, payload.error.message);
-  }
-  throw new ApiError(response.status, 'HTTP_ERROR', `Model inventory failed with HTTP ${response.status}.`);
+  return safeJsonError(response, 'HTTP_ERROR', `Model inventory failed with HTTP ${response.status}.`);
+}
+
+export async function fetchModelDetail(targetId: string, modelName: string): Promise<ModelDetailView> {
+  const response = await fetch(
+    `/api/v1/targets/${encodeURIComponent(targetId)}/model-details?model=${encodeURIComponent(modelName)}`,
+    {
+      method: 'GET',
+      credentials: 'include',
+      headers: { accept: 'application/json' },
+    },
+  );
+  if (response.ok) return await response.json() as ModelDetailView;
+  return safeJsonError(response, 'HTTP_ERROR', `Model detail failed with HTTP ${response.status}.`);
 }
 
 export interface ModelInventorySummary {
