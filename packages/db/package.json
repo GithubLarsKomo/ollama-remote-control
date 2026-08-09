@@ -12,6 +12,10 @@
       "types": "./dist/host-catalog.d.ts",
       "import": "./dist/host-catalog.js"
     },
+    "./modelfile-deploy-plans": {
+      "types": "./dist/modelfile-deploy-plans.d.ts",
+      "import": "./dist/modelfile-deploy-plans.js"
+    },
     "./modelfiles": {
       "types": "./dist/modelfiles.d.ts",
       "import": "./dist/modelfiles.js"
