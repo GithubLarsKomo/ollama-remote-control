@@ -1,0 +1,161 @@
+.model-pull-panel {
+  margin: 1.25rem 0 1.5rem;
+  padding: 1.1rem;
+  border: 1px solid #d7deea;
+  border-radius: 14px;
+  background: #f8fafc;
+}
+
+.model-pull-heading,
+.pull-progress-heading,
+.pull-job-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.model-pull-heading h3 {
+  margin: 0.15rem 0 0.25rem;
+}
+
+.model-pull-form {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: end;
+  gap: 0.8rem;
+  margin-top: 1rem;
+}
+
+.model-pull-form label {
+  display: grid;
+  gap: 0.35rem;
+  font-weight: 600;
+}
+
+.model-pull-form input {
+  min-width: 0;
+  padding: 0.7rem 0.8rem;
+  border: 1px solid #cbd5e1;
+  border-radius: 9px;
+  background: #fff;
+  font: inherit;
+}
+
+.pull-job-card {
+  display: grid;
+  gap: 0.9rem;
+  margin-top: 1rem;
+  padding: 1rem;
+  border: 1px solid #cbd5e1;
+  border-radius: 12px;
+  background: #fff;
+}
+
+.pull-job-summary {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0.8rem;
+}
+
+.pull-job-summary > div {
+  display: grid;
+  gap: 0.2rem;
+  min-width: 0;
+}
+
+.pull-job-summary span {
+  color: #64748b;
+  font-size: 0.78rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.pull-job-summary strong,
+.pull-job-summary code {
+  overflow-wrap: anywhere;
+}
+
+.pull-progress {
+  display: grid;
+  gap: 0.55rem;
+}
+
+.pull-progress-heading span {
+  font-variant-numeric: tabular-nums;
+  font-weight: 700;
+}
+
+.pull-progress-bar {
+  width: 100%;
+  height: 0.65rem;
+  overflow: hidden;
+  border-radius: 999px;
+  background: #e2e8f0;
+}
+
+.pull-progress-bar > span {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: currentColor;
+}
+
+.pull-progress-meta {
+  display: flex;
+  justify-content: space-between;
+  gap: 0.8rem;
+  color: #475569;
+  font-size: 0.88rem;
+}
+
+.pull-progress-meta code {
+  overflow-wrap: anywhere;
+}
+
+.pull-stream-notice,
+.pull-cancel-warning,
+.pull-success,
+.model-pull-boundary {
+  margin: 0;
+  padding: 0.75rem 0.85rem;
+  border-radius: 9px;
+  font-size: 0.9rem;
+  line-height: 1.45;
+}
+
+.pull-stream-notice {
+  background: #eff6ff;
+  color: #1e3a8a;
+}
+
+.pull-cancel-warning {
+  background: #fff7ed;
+  color: #7c2d12;
+}
+
+.pull-success {
+  background: #f0fdf4;
+  color: #14532d;
+}
+
+.model-pull-boundary {
+  margin-top: 0.9rem;
+  background: #f1f5f9;
+  color: #475569;
+}
+
+@media (max-width: 760px) {
+  .model-pull-form,
+  .pull-job-summary {
+    grid-template-columns: 1fr;
+  }
+
+  .model-pull-heading,
+  .pull-progress-heading,
+  .pull-progress-meta,
+  .pull-job-actions {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+}

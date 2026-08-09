@@ -60,6 +60,10 @@ import {
   TargetLogService,
 } from './logs.js';
 import {
+  ModelPullError,
+  ModelPullService,
+} from './model-pull.js';
+import {
   ModelfileLibraryError,
   ModelfileLibraryService,
   type AppendModelfileRevisionInput,
@@ -79,6 +83,11 @@ import {
   OllamaModelInventoryService,
 } from './ollama-models.js';
 import { publicDockerDiscovery } from './public-discovery.js';
+import {
+  parsePullEventCursor,
+  PullJobEventError,
+  streamPullJobEvents,
+} from './pull-job-events.js';
 import {
   TargetStatusError,
   TargetStatusService,
@@ -134,13 +143,16 @@ interface HostCreateBody extends HostProbeBody {
 interface TargetSelectionBody { readonly containerId?: unknown; readonly displayName?: unknown; }
 interface ContainerLifecycleBody { readonly confirmation?: ContainerLifecycleConfirmation; }
 interface UpdateIntentBody { readonly snapshotId?: unknown; }
+interface ModelPullBody { readonly model?: unknown; }
 interface HostParams { readonly hostId: string; }
 interface TargetParams { readonly targetId: string; }
+interface JobParams { readonly jobId: string; }
 interface ModelfileParams { readonly modelfileId: string; }
 interface ModelfileRevisionParams extends ModelfileParams { readonly revisionId: string; }
 interface SnapshotQuery { readonly snapshotId?: unknown; }
 interface ModelDetailQuery { readonly model?: unknown; }
 interface LogQuery { readonly tail?: unknown; }
+interface PullEventQuery { readonly after?: unknown; }
 interface LoginBucket { failures: number; resetAt: number; }
 
 class LoginLimiter {
@@ -196,6 +208,8 @@ function sendApiError(reply: FastifyReply, error: unknown): FastifyReply {
     || error instanceof TargetDiscoveryError
     || error instanceof TargetStatusError
     || error instanceof TargetLogError
+    || error instanceof ModelPullError
+    || error instanceof PullJobEventError
     || error instanceof ModelfileLibraryError
     || error instanceof OllamaHealthError
     || error instanceof OllamaModelDetailError
@@ -250,6 +264,16 @@ export function buildServer(options: BuildServerOptions = {}): FastifyInstance {
   const ollamaModels = new OllamaModelInventoryService(hostRepository, credentialRepository, targetRepository, masterKey);
   const ollamaModelDetails = new OllamaModelDetailService(hostRepository, credentialRepository, targetRepository, masterKey);
   const modelfiles = new ModelfileLibraryService(modelfileRepository, auditService, ollamaModelDetails, now);
+  const modelPull = new ModelPullService(
+    hostRepository,
+    credentialRepository,
+    targetRepository,
+    masterKey,
+    jobService,
+    auditService,
+    ollamaModels,
+    now,
+  );
   const updateRemoteFactory = options.updateRemoteFactory ?? createSshUpdateRemoteFactory(ollamaHealth);
   const containerLifecycle = new ContainerLifecycleService(
     hostRepository,
@@ -323,6 +347,7 @@ export function buildServer(options: BuildServerOptions = {}): FastifyInstance {
 
   app.addHook('onReady', async () => {
     await updateReconciliation.reconcile();
+    await modelPull.reconcile();
   });
 
   function requireAuthenticated(request: FastifyRequest): StoredSession {
@@ -480,6 +505,59 @@ export function buildServer(options: BuildServerOptions = {}): FastifyInstance {
       return reply.send(await ollamaModelDetails.read(request.params.targetId, request.query?.model));
     } catch (error) { return sendApiError(reply, error); }
   });
+  app.post<{ Params: TargetParams; Body: ModelPullBody }>('/api/v1/targets/:targetId/models/pull', async (request, reply) => {
+    try {
+      const session = requireAuthenticatedMutation(request);
+      return reply.code(202).send({ job: modelPull.start(request.params.targetId, session.userId, request.body?.model) });
+    } catch (error) { return sendApiError(reply, error); }
+  });
+  app.get<{ Params: TargetParams }>('/api/v1/targets/:targetId/models/pull/active', async (request, reply) => {
+    try {
+      const session = requireAuthenticated(request);
+      const active = jobService.jobsNeedingReconciliation().find((job) => (
+        job.kind === 'model-pull'
+        && job.targetId === request.params.targetId
+        && job.actorUserId === session.userId
+      ));
+      return reply.send({ job: active ? modelPull.get(active.id, session.userId) : null });
+    } catch (error) { return sendApiError(reply, error); }
+  });
+  app.get<{ Params: JobParams }>('/api/v1/jobs/:jobId', async (request, reply) => {
+    try {
+      const session = requireAuthenticated(request);
+      return reply.send({ job: modelPull.get(request.params.jobId, session.userId) });
+    } catch (error) { return sendApiError(reply, error); }
+  });
+  app.post<{ Params: JobParams }>('/api/v1/jobs/:jobId/cancel', async (request, reply) => {
+    try {
+      const session = requireAuthenticatedMutation(request);
+      return reply.send({ job: modelPull.cancel(request.params.jobId, session.userId) });
+    } catch (error) { return sendApiError(reply, error); }
+  });
+  app.get<{ Params: JobParams; Querystring: PullEventQuery }>('/api/v1/jobs/:jobId/events', async (request, reply) => {
+    let session: StoredSession;
+    let cursor: number;
+    try {
+      session = requireAuthenticated(request);
+      modelPull.get(request.params.jobId, session.userId);
+      cursor = parsePullEventCursor(request.query?.after ?? request.headers['last-event-id']);
+    } catch (error) {
+      return sendApiError(reply, error);
+    }
+    reply.hijack();
+    reply.raw.writeHead(200, {
+      'content-type': 'text/event-stream; charset=utf-8',
+      'cache-control': 'no-cache, no-transform',
+      connection: 'keep-alive',
+      'x-accel-buffering': 'no',
+    });
+    void streamPullJobEvents(reply.raw, modelPull, request.params.jobId, session.userId, cursor).catch(() => {
+      if (!reply.raw.destroyed && !reply.raw.writableEnded) {
+        reply.raw.write(`event: error\ndata: ${JSON.stringify({ code: 'JOB_EVENT_STREAM_FAILED', message: 'Pull job event stream failed.' })}\n\n`);
+        reply.raw.end();
+      }
+    });
+  });
 
   function registerContainerLifecycleRoute(action: DockerLifecycleAction): void {
     app.post<{ Params: TargetParams; Body: ContainerLifecycleBody }>(
@@ -594,7 +672,10 @@ export function buildServer(options: BuildServerOptions = {}): FastifyInstance {
     );
     remoteStream.start();
   });
-  app.addHook('onClose', async () => { database.close(); });
+  app.addHook('onClose', async () => {
+    await modelPull.shutdown();
+    database.close();
+  });
   return app;
 }
 
