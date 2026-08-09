@@ -31,6 +31,15 @@ export interface SshHttpOptions {
 
 export type OllamaReadPath = '/api/version' | '/api/tags' | '/api/ps';
 const OLLAMA_READ_PATHS = new Set<string>(['/api/version', '/api/tags', '/api/ps']);
+const MAX_OLLAMA_MODEL_NAME = 512;
+const MAX_HTTP_RESPONSE_BYTES = 4 * 1024 * 1024;
+
+interface FixedHttpRequest {
+  readonly method: 'GET' | 'POST';
+  readonly path: string;
+  readonly body?: Buffer;
+  readonly contentType?: string;
+}
 
 function fingerprintSha256(key: Buffer): string {
   return `SHA256:${createHash('sha256').update(key).digest('base64').replace(/=+$/u, '')}`;
@@ -96,18 +105,7 @@ export function parseHttpResponse(raw: Buffer, maxBodyBytes: number): SshHttpRes
   return { statusCode: Number(statusMatch[1]), headers, body };
 }
 
-export async function httpGetViaPinnedSsh(
-  connection: SshPrivateKeyConnection,
-  destinationHost: string,
-  destinationPort: number,
-  requestPath: OllamaReadPath,
-  options: SshHttpOptions = {},
-): Promise<SshHttpResponse> {
-  const timeoutMs = options.timeoutMs ?? 5_000;
-  const maxResponseBytes = options.maxResponseBytes ?? 64 * 1024;
-  if (!OLLAMA_READ_PATHS.has(requestPath)) {
-    throw new SshHttpError('HTTP_REQUEST_INVALID', 'Ollama HTTP request path is not allowed.');
-  }
+function validateDestination(destinationHost: string, destinationPort: number, timeoutMs: number, maxResponseBytes: number): void {
   if (!Number.isInteger(destinationPort) || destinationPort < 1 || destinationPort > 65535) {
     throw new SshHttpError('SSH_FORWARD_FAILED', 'SSH forward destination port is invalid.');
   }
@@ -117,9 +115,21 @@ export async function httpGetViaPinnedSsh(
   if (!Number.isInteger(timeoutMs) || timeoutMs < 100 || timeoutMs > 60_000) {
     throw new SshHttpError('HTTP_TIMEOUT', 'HTTP timeout is invalid.');
   }
-  if (!Number.isInteger(maxResponseBytes) || maxResponseBytes < 256 || maxResponseBytes > 1024 * 1024) {
+  if (!Number.isInteger(maxResponseBytes) || maxResponseBytes < 256 || maxResponseBytes > MAX_HTTP_RESPONSE_BYTES) {
     throw new SshHttpError('HTTP_RESPONSE_TOO_LARGE', 'HTTP response size limit is invalid.');
   }
+}
+
+async function httpRequestViaPinnedSsh(
+  connection: SshPrivateKeyConnection,
+  destinationHost: string,
+  destinationPort: number,
+  request: FixedHttpRequest,
+  options: SshHttpOptions,
+): Promise<SshHttpResponse> {
+  const timeoutMs = options.timeoutMs ?? 5_000;
+  const maxResponseBytes = options.maxResponseBytes ?? 64 * 1024;
+  validateDestination(destinationHost, destinationPort, timeoutMs, maxResponseBytes);
 
   return new Promise<SshHttpResponse>((resolve, reject) => {
     const client = new Client();
@@ -168,14 +178,18 @@ export async function httpGetViaPinnedSsh(
           }
         });
         const hostHeader = destinationHost.includes(':') ? `[${destinationHost}]:${destinationPort}` : `${destinationHost}:${destinationPort}`;
-        stream.end([
-          `GET ${requestPath} HTTP/1.1`,
+        const headers = [
+          `${request.method} ${request.path} HTTP/1.1`,
           `Host: ${hostHeader}`,
           'Accept: application/json',
-          'Connection: close',
-          '',
-          '',
-        ].join('\r\n'));
+        ];
+        if (request.body) {
+          headers.push(`Content-Type: ${request.contentType ?? 'application/json'}`);
+          headers.push(`Content-Length: ${request.body.length}`);
+        }
+        headers.push('Connection: close', '', '');
+        const head = Buffer.from(headers.join('\r\n'), 'utf8');
+        stream.end(request.body ? Buffer.concat([head, request.body]) : head);
       });
     });
     client.once('error', () => {
@@ -201,4 +215,48 @@ export async function httpGetViaPinnedSsh(
       },
     });
   });
+}
+
+export async function httpGetViaPinnedSsh(
+  connection: SshPrivateKeyConnection,
+  destinationHost: string,
+  destinationPort: number,
+  requestPath: OllamaReadPath,
+  options: SshHttpOptions = {},
+): Promise<SshHttpResponse> {
+  if (!OLLAMA_READ_PATHS.has(requestPath)) {
+    throw new SshHttpError('HTTP_REQUEST_INVALID', 'Ollama HTTP request path is not allowed.');
+  }
+  return httpRequestViaPinnedSsh(
+    connection,
+    destinationHost,
+    destinationPort,
+    { method: 'GET', path: requestPath },
+    options,
+  );
+}
+
+export async function httpPostOllamaShowViaPinnedSsh(
+  connection: SshPrivateKeyConnection,
+  destinationHost: string,
+  destinationPort: number,
+  modelName: string,
+  options: SshHttpOptions = {},
+): Promise<SshHttpResponse> {
+  if (
+    typeof modelName !== 'string'
+    || modelName.length < 1
+    || modelName.length > MAX_OLLAMA_MODEL_NAME
+    || !/^[A-Za-z0-9][A-Za-z0-9._/:@+-]*$/u.test(modelName)
+  ) {
+    throw new SshHttpError('HTTP_REQUEST_INVALID', 'Ollama model name is invalid.');
+  }
+  const body = Buffer.from(JSON.stringify({ model: modelName, verbose: false }), 'utf8');
+  return httpRequestViaPinnedSsh(
+    connection,
+    destinationHost,
+    destinationPort,
+    { method: 'POST', path: '/api/show', body, contentType: 'application/json' },
+    options,
+  );
 }
