@@ -55,6 +55,7 @@ interface ResolvedPullTarget {
 interface RunningMetadata {
   readonly model: string;
   readonly previousDigest: string | null;
+  readonly selectedContainerId: string;
 }
 
 export interface PublicPullJob {
@@ -82,6 +83,12 @@ export function normalizePullModelName(value: unknown): string {
     throw new ModelPullError('INVALID_MODEL_NAME', 400, 'Model name is invalid.');
   }
   return model;
+}
+
+function normalizedContainerId(value: unknown): string | null {
+  if (typeof value !== 'string') return null;
+  const text = value.trim();
+  return /^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$/u.test(text) ? text : null;
 }
 
 function canonicalModelName(value: string): string {
@@ -132,7 +139,10 @@ function runningMetadata(job: StoredJob): RunningMetadata | null {
       : typeof parsed.previousDigest === 'string' && /^[a-f0-9]{64}$/iu.test(parsed.previousDigest)
         ? parsed.previousDigest.toLowerCase()
         : undefined;
-    return previousDigest === undefined ? null : { model, previousDigest };
+    const selectedContainerId = normalizedContainerId(parsed.selectedContainerId);
+    return previousDigest === undefined || !selectedContainerId
+      ? null
+      : { model, previousDigest, selectedContainerId };
   } catch {
     return null;
   }
@@ -153,6 +163,8 @@ function progressPayload(progress: OllamaPullProgress): Readonly<Record<string, 
 
 export class ModelPullService {
   private readonly controllers = new Map<string, AbortController>();
+  private readonly tasks = new Set<Promise<void>>();
+  private shuttingDown = false;
 
   constructor(
     private readonly hosts: HostOnboardingRepository,
@@ -195,13 +207,25 @@ export class ModelPullService {
     };
   }
 
-  private async resolveRoute(targetId: string): Promise<ResolvedPullTarget> {
+  private assertExpectedBinding(targetId: string, expectedContainerId: string): ReturnType<ModelPullService['resolveLocal']> {
     const local = this.resolveLocal(targetId);
+    if (local.selectedContainerId !== expectedContainerId) {
+      throw new ModelPullError(
+        'TARGET_BINDING_STALE',
+        409,
+        'Ollama target binding changed after the pull job was accepted.',
+      );
+    }
+    return local;
+  }
+
+  private async resolveRoute(targetId: string, expectedContainerId: string): Promise<ResolvedPullTarget> {
+    const local = this.assertExpectedBinding(targetId, expectedContainerId);
     let inspectResult;
     try {
       inspectResult = await execPrivateKey(
         local.connection,
-        ['docker', 'inspect', local.selectedContainerId],
+        ['docker', 'inspect', expectedContainerId],
         { timeoutMs: 10_000, maxOutputBytes: 2 * 1024 * 1024 },
       );
     } catch (error) {
@@ -224,8 +248,10 @@ export class ModelPullService {
   }
 
   start(targetId: string, actorUserId: string, modelValue: unknown): PublicPullJob {
+    if (this.shuttingDown) throw new ModelPullError('SERVER_SHUTTING_DOWN', 503, 'Model pull service is shutting down.');
     const model = normalizePullModelName(modelValue);
     const target = this.resolveLocal(targetId);
+    const expectedContainerId = target.selectedContainerId;
     const job = this.jobs.create({ targetId, actorUserId, kind: 'model-pull', mutating: true });
     this.jobs.appendEvent(job.id, 'pull-request', { model });
     this.audit.record({
@@ -237,36 +263,59 @@ export class ModelPullService {
       result: 'accepted',
       jobId: job.id,
     });
-    void this.run(job.id, actorUserId, model).catch(() => {
-      // run() terminalizes known failures itself; this guard prevents detached promise rejection.
-      const current = this.jobs.get(job.id);
-      if (current.state === 'queued' || current.state === 'running' || current.state === 'cancelling') {
-        this.jobs.transition(job.id, 'failed', { errorClass: 'PULL_INTERNAL_ERROR' });
-      }
-    });
+
+    let task!: Promise<void>;
+    task = this.run(job.id, actorUserId, model, expectedContainerId)
+      .catch(() => {
+        if (this.shuttingDown) return;
+        try {
+          const current = this.jobs.get(job.id);
+          if (current.state === 'queued' || current.state === 'running' || current.state === 'cancelling') {
+            this.jobs.transition(job.id, 'failed', { errorClass: 'PULL_INTERNAL_ERROR' });
+          }
+        } catch {
+          // A detached worker must never create an unhandled rejection.
+        }
+      })
+      .finally(() => { this.tasks.delete(task); });
+    this.tasks.add(task);
     return publicJob(job);
   }
 
-  private async run(jobId: string, actorUserId: string, model: string): Promise<void> {
+  private async run(jobId: string, actorUserId: string, model: string, expectedContainerId: string): Promise<void> {
     const initial = this.jobs.get(jobId);
     if (initial.state !== 'queued') return;
+    try {
+      this.assertExpectedBinding(initial.targetId, expectedContainerId);
+    } catch (error) {
+      this.fail(jobId, actorUserId, initial.targetId, error instanceof ModelPullError ? error.code : 'TARGET_BINDING_STALE');
+      return;
+    }
+
     let baseline: InstalledOllamaModelView | null;
     try {
       const inventory = await this.inventory.read(initial.targetId);
       baseline = matchingInstalledModel(inventory.installed, model);
-    } catch (error) {
+    } catch {
+      if (this.shuttingDown) return;
       this.fail(jobId, actorUserId, initial.targetId, 'PULL_PREFLIGHT_FAILED');
       return;
     }
+    if (this.shuttingDown) return;
 
     const controller = new AbortController();
     this.controllers.set(jobId, controller);
     try {
+      this.assertExpectedBinding(initial.targetId, expectedContainerId);
       const running = this.jobs.transition(jobId, 'running', {
-        result: { model, previousDigest: baseline?.digest ?? null },
+        result: {
+          model,
+          previousDigest: baseline?.digest ?? null,
+          selectedContainerId: expectedContainerId,
+        },
       });
       this.jobs.appendEvent(jobId, 'pull-baseline', { model, previousDigest: baseline?.digest ?? null });
-      const target = await this.resolveRoute(running.targetId);
+      const target = await this.resolveRoute(running.targetId, expectedContainerId);
       let sawSuccess = false;
       let lastPersistedAt = 0;
       let lastStatus: string | null = null;
@@ -303,6 +352,7 @@ export class ModelPullService {
         },
       );
 
+      if (this.shuttingDown) return;
       if (this.jobs.get(jobId).state === 'cancelling') {
         this.fail(jobId, actorUserId, running.targetId, 'CANCEL_UNVERIFIED');
         return;
@@ -311,6 +361,13 @@ export class ModelPullService {
         this.fail(jobId, actorUserId, running.targetId, 'PULL_STREAM_INCOMPLETE');
         return;
       }
+      try {
+        this.assertExpectedBinding(running.targetId, expectedContainerId);
+      } catch (error) {
+        this.fail(jobId, actorUserId, running.targetId, error instanceof ModelPullError ? error.code : 'TARGET_BINDING_STALE');
+        return;
+      }
+
       let installed: InstalledOllamaModelView | null = null;
       try {
         const verified = await this.inventory.read(running.targetId);
@@ -328,6 +385,7 @@ export class ModelPullService {
       });
       this.auditTerminal(actorUserId, target.hostId, running.targetId, jobId, model, 'succeeded', null);
     } catch (error) {
+      if (this.shuttingDown && controller.signal.aborted) return;
       const current = this.jobs.get(jobId);
       if (current.state === 'cancelling' || (error instanceof OllamaPullStreamError && error.code === 'PULL_ABORTED')) {
         this.fail(jobId, actorUserId, current.targetId, 'CANCEL_UNVERIFIED');
@@ -352,7 +410,7 @@ export class ModelPullService {
     if (job.kind !== 'model-pull') throw new ModelPullError('JOB_NOT_CANCELLABLE', 409, 'Job is not a model pull job.');
     if (job.state === 'queued') {
       const cancelled = this.jobs.transition(job.id, 'cancelled', { errorClass: null });
-      this.auditTerminal(actorUserId, null, job.targetId, job.id, null, 'cancelled', null);
+      this.auditTerminal(actorUserId, this.hostIdForTarget(job.targetId), job.targetId, job.id, null, 'cancelled', null);
       return publicJob(cancelled);
     }
     if (job.state === 'running') {
@@ -378,39 +436,92 @@ export class ModelPullService {
   async reconcile(): Promise<void> {
     for (const job of this.jobs.jobsNeedingReconciliation()) {
       if (job.kind !== 'model-pull') continue;
-      if (job.state === 'queued') {
-        this.jobs.transition(job.id, 'failed', { errorClass: 'PULL_INTERRUPTED_BEFORE_START' });
-        continue;
-      }
-      if (job.state === 'cancelling') {
-        this.jobs.transition(job.id, 'failed', { errorClass: 'CANCEL_UNVERIFIED' });
-        continue;
-      }
-      const metadata = runningMetadata(job);
-      if (!metadata) {
-        this.jobs.transition(job.id, 'failed', { errorClass: 'PULL_OUTCOME_UNKNOWN' });
-        continue;
-      }
+      let model: string | null = null;
+      let errorClass: string | null = null;
+      let result = 'failed';
       try {
+        if (job.state === 'queued') {
+          errorClass = 'PULL_INTERRUPTED_BEFORE_START';
+          this.jobs.transition(job.id, 'failed', { errorClass });
+          continue;
+        }
+        if (job.state === 'cancelling') {
+          errorClass = 'CANCEL_UNVERIFIED';
+          this.jobs.transition(job.id, 'failed', { errorClass });
+          continue;
+        }
+        const metadata = runningMetadata(job);
+        if (!metadata) {
+          errorClass = 'PULL_OUTCOME_UNKNOWN';
+          this.jobs.transition(job.id, 'failed', { errorClass });
+          continue;
+        }
+        model = metadata.model;
+        const currentBinding = this.targets.findById(job.targetId)?.selectedContainerId ?? null;
+        if (currentBinding !== metadata.selectedContainerId) {
+          errorClass = 'TARGET_BINDING_STALE';
+          this.jobs.transition(job.id, 'failed', { errorClass });
+          continue;
+        }
         const current = matchingInstalledModel((await this.inventory.read(job.targetId)).installed, metadata.model);
         if (current && (metadata.previousDigest === null || current.digest !== metadata.previousDigest)) {
           this.jobs.transition(job.id, 'succeeded', {
             result: { model: metadata.model, digest: current.digest, sizeBytes: current.sizeBytes, reconciled: true },
           });
+          result = 'succeeded';
         } else {
-          this.jobs.transition(job.id, 'failed', { errorClass: 'PULL_OUTCOME_UNKNOWN' });
+          errorClass = 'PULL_OUTCOME_UNKNOWN';
+          this.jobs.transition(job.id, 'failed', { errorClass });
         }
       } catch {
-        this.jobs.transition(job.id, 'failed', { errorClass: 'PULL_RECONCILIATION_FAILED' });
+        const latest = this.jobs.get(job.id);
+        if (latest.state === 'running') {
+          errorClass = 'PULL_RECONCILIATION_FAILED';
+          this.jobs.transition(job.id, 'failed', { errorClass });
+        }
+      } finally {
+        const terminal = this.jobs.get(job.id);
+        if (terminal.state === 'succeeded') result = 'succeeded';
+        else if (terminal.state === 'cancelled') result = 'cancelled';
+        else if (terminal.state === 'failed') errorClass = terminal.errorClass ?? errorClass;
+        if (terminal.state === 'succeeded' || terminal.state === 'failed' || terminal.state === 'cancelled') {
+          this.auditTerminal(
+            terminal.actorUserId,
+            this.hostIdForTarget(terminal.targetId),
+            terminal.targetId,
+            terminal.id,
+            model,
+            result,
+            errorClass,
+          );
+        }
       }
     }
+  }
+
+  async shutdown(): Promise<void> {
+    this.shuttingDown = true;
+    for (const controller of this.controllers.values()) controller.abort();
+    await Promise.allSettled([...this.tasks]);
+  }
+
+  private hostIdForTarget(targetId: string): string | null {
+    return this.targets.findById(targetId)?.hostId ?? null;
   }
 
   private fail(jobId: string, actorUserId: string, targetId: string, errorClass: string): void {
     const current = this.jobs.get(jobId);
     if (current.state === 'failed' || current.state === 'succeeded' || current.state === 'cancelled') return;
     const failed = this.jobs.transition(jobId, 'failed', { errorClass });
-    this.auditTerminal(actorUserId, null, targetId, jobId, null, failed.state, errorClass);
+    this.auditTerminal(
+      actorUserId,
+      this.hostIdForTarget(targetId),
+      targetId,
+      jobId,
+      null,
+      failed.state,
+      errorClass,
+    );
   }
 
   private auditTerminal(
