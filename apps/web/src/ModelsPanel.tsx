@@ -11,6 +11,7 @@ import {
 import { formatBytes, formatTimestamp } from './format.js';
 import LocalModelfilesPanel from './LocalModelfilesPanel.js';
 import ModelDetailsPanel from './ModelDetailsPanel.js';
+import ModelPullPanel from './ModelPullPanel.js';
 import {
   fetchModelInventory,
   runningModelDigests,
@@ -107,10 +108,10 @@ export default function ModelsPanel({ status, disabled, onSignedOut }: ModelsPan
     <section className="models-panel" aria-labelledby="models-title">
       <div className="models-heading">
         <div>
-          <p className="eyebrow">Read-only Ollama API</p>
+          <p className="eyebrow">Ollama API over pinned SSH</p>
           <h2 id="models-title">Models</h2>
           <p className="muted">
-            Installed and currently loaded models are read through the Ollama API over the pinned SSH tunnel. Port 11434 remains private.
+            Inventory, details and local Modelfile revisions stay server-authoritative. Model pulls run as persistent jobs through a fixed Ollama API operation. Port 11434 remains private.
           </p>
         </div>
         <button
@@ -123,8 +124,15 @@ export default function ModelsPanel({ status, disabled, onSignedOut }: ModelsPan
         </button>
       </div>
 
+      <ModelPullPanel
+        disabled={disabled || busy || !status.container.running}
+        onSignedOut={onSignedOut}
+        onSucceeded={load}
+        targetId={status.target.id}
+      />
+
       {!status.container.running ? (
-        <p className="models-notice">Start the Ollama container to read its model inventory.</p>
+        <p className="models-notice">Start the Ollama container to read its model inventory or begin a new pull.</p>
       ) : null}
       {error ? <p className="error-box" role="alert">{error}</p> : null}
       {busy && !inventory ? <p className="loading-box" role="status">Reading Ollama model inventory…</p> : null}
