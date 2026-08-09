@@ -8,6 +8,18 @@
       "types": "./dist/index.d.ts",
       "import": "./dist/index.js"
     },
+    "./modelfile-diff": {
+      "types": "./dist/modelfile-diff.d.ts",
+      "import": "./dist/modelfile-diff.js"
+    },
+    "./modelfile-editor": {
+      "types": "./dist/modelfile-editor.d.ts",
+      "import": "./dist/modelfile-editor.js"
+    },
+    "./modelfile-parser": {
+      "types": "./dist/modelfile-parser.d.ts",
+      "import": "./dist/modelfile-parser.js"
+    },
     "./modelfiles": {
       "types": "./dist/modelfiles.d.ts",
       "import": "./dist/modelfiles.js"

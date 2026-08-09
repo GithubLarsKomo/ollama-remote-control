@@ -5,6 +5,7 @@ import {
   useMemo,
   useState,
 } from 'react';
+import { diffModelfileText } from '@orc/core/modelfile-diff';
 import { ApiError, type TargetStatusResult } from './api.js';
 import { formatTimestamp } from './format.js';
 import type { ModelInventoryView } from './model-inventory.js';
@@ -21,7 +22,11 @@ import {
   type ModelfileSummaryView,
   type ModelfileView,
 } from './modelfile-library.js';
+import StructuredModelfileEditor from './StructuredModelfileEditor.js';
 import './modelfiles.css';
+import './modelfile-editor.css';
+
+type EditorMode = 'raw' | 'structured' | 'diff';
 
 interface LocalModelfilesPanelProps {
   readonly status: TargetStatusResult;
@@ -44,6 +49,12 @@ function shortHash(hash: string): string {
   return `${hash.slice(0, 12)}…`;
 }
 
+function lineEndingLabel(ending: 'lf' | 'crlf' | 'none'): string {
+  if (ending === 'crlf') return 'CRLF';
+  if (ending === 'lf') return 'LF';
+  return 'EOF';
+}
+
 export default function LocalModelfilesPanel({
   status,
   inventory,
@@ -55,6 +66,7 @@ export default function LocalModelfilesPanel({
   const [selected, setSelected] = useState<ModelfileView | null>(null);
   const [history, setHistory] = useState<readonly ModelfileRevisionSummaryView[]>([]);
   const [historicalRevision, setHistoricalRevision] = useState<ModelfileRevisionView | null>(null);
+  const [editorMode, setEditorMode] = useState<EditorMode>('raw');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
@@ -66,7 +78,6 @@ export default function LocalModelfilesPanel({
   const [importModel, setImportModel] = useState(inventory.installed[0]?.model ?? '');
   const [importName, setImportName] = useState('');
   const [importDescription, setImportDescription] = useState('');
-
   const [revisionRaw, setRevisionRaw] = useState('');
 
   const handleError = useCallback((operationError: unknown) => {
@@ -99,6 +110,7 @@ export default function LocalModelfilesPanel({
     setBusy(true);
     setError(null);
     setHistoricalRevision(null);
+    setEditorMode('raw');
     try {
       const [detailResponse, historyResponse] = await Promise.all([
         readLocalModelfile(modelfileId),
@@ -134,6 +146,11 @@ export default function LocalModelfilesPanel({
     () => artifacts.find((artifact) => artifact.id === selectedId) ?? null,
     [artifacts, selectedId],
   );
+
+  const revisionDiff = useMemo(() => {
+    if (!selected || !historicalRevision) return null;
+    return diffModelfileText(historicalRevision.rawText, selected.currentRevision.rawText);
+  }, [historicalRevision, selected]);
 
   async function createArtifact(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -186,7 +203,7 @@ export default function LocalModelfilesPanel({
 
   async function appendRevision(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (!selected) return;
+    if (!selected || editorMode === 'diff') return;
     const expectedCurrentRevisionId = selected.currentRevisionId;
     setBusy(true);
     setError(null);
@@ -199,6 +216,7 @@ export default function LocalModelfilesPanel({
       setSelected(response.modelfile);
       setRevisionRaw(response.modelfile.currentRevision.rawText);
       setHistoricalRevision(null);
+      setEditorMode('raw');
       setNotice(`Created revision ${response.modelfile.currentRevision.revisionNumber}; earlier revisions remain immutable.`);
       await loadList(response.modelfile.id);
       const historyResponse = await listLocalModelfileRevisions(response.modelfile.id);
@@ -211,7 +229,8 @@ export default function LocalModelfilesPanel({
           setSelected(current.modelfile);
           const currentHistory = await listLocalModelfileRevisions(selected.id);
           setHistory(currentHistory.revisions);
-          setNotice('The server has a newer current revision. Your draft remains in the editor; compare it before retrying.');
+          setHistoricalRevision(null);
+          setNotice('The server has a newer current revision. Your unsaved draft remains in the editor; compare it before retrying.');
         } catch (refreshError) {
           handleError(refreshError);
         }
@@ -223,11 +242,16 @@ export default function LocalModelfilesPanel({
 
   async function viewHistoricalRevision(revisionId: string) {
     if (!selectedId) return;
+    if (!revisionId) {
+      setHistoricalRevision(null);
+      return;
+    }
     setBusy(true);
     setError(null);
     try {
       const response = await readLocalModelfileRevision(selectedId, revisionId);
       setHistoricalRevision(response.revision);
+      setEditorMode('diff');
     } catch (readError) {
       handleError(readError);
     } finally {
@@ -242,7 +266,7 @@ export default function LocalModelfilesPanel({
           <p className="eyebrow">Local versioned source</p>
           <h3 id="local-modelfiles-title">Local Modelfiles</h3>
           <p className="muted">
-            Raw Modelfile text is the canonical source. Every save creates a new immutable server-side revision.
+            Raw Modelfile text stays canonical. Structured controls patch only recognized safe spans; every save creates a new immutable revision.
           </p>
         </div>
         <button className="secondary-button" disabled={disabled || busy} onClick={() => void loadList(selectedId)} type="button">
@@ -339,20 +363,100 @@ export default function LocalModelfilesPanel({
               ) : null}
 
               <form className="modelfile-revision-form" onSubmit={(event) => void appendRevision(event)}>
-                <label>
-                  New revision based on r{selected.currentRevisionNumber}
-                  <textarea
-                    disabled={disabled || busy}
-                    onChange={(event) => setRevisionRaw(event.target.value)}
-                    rows={14}
-                    spellCheck={false}
-                    value={revisionRaw}
-                  />
-                </label>
-                <div className="modelfile-revision-actions">
-                  <span className="muted">Base: <code>{shortHash(selected.currentRevision.contentSha256)}</code></span>
-                  <button className="primary-button" disabled={disabled || busy || !revisionRaw} type="submit">Create next revision</button>
+                <div className="modelfile-editor-tabs" role="tablist" aria-label="Modelfile editor views">
+                  {(['raw', 'structured', 'diff'] as const).map((mode) => (
+                    <button
+                      aria-selected={editorMode === mode}
+                      className={editorMode === mode ? 'modelfile-editor-tab active' : 'modelfile-editor-tab'}
+                      key={mode}
+                      onClick={() => setEditorMode(mode)}
+                      role="tab"
+                      type="button"
+                    >
+                      {mode === 'raw' ? 'Raw' : mode === 'structured' ? 'Structured' : 'Diff'}
+                    </button>
+                  ))}
                 </div>
+
+                {editorMode === 'raw' ? (
+                  <label className="modelfile-raw-editor">
+                    Draft based on r{selected.currentRevisionNumber}
+                    <textarea
+                      disabled={disabled || busy}
+                      onChange={(event) => setRevisionRaw(event.target.value)}
+                      rows={18}
+                      spellCheck={false}
+                      value={revisionRaw}
+                    />
+                  </label>
+                ) : null}
+
+                {editorMode === 'structured' ? (
+                  <StructuredModelfileEditor disabled={disabled || busy} onChange={setRevisionRaw} raw={revisionRaw} />
+                ) : null}
+
+                {editorMode === 'diff' ? (
+                  <section className="modelfile-diff" role="tabpanel">
+                    <div className="modelfile-diff-toolbar">
+                      <label>
+                        Compare current revision with
+                        <select
+                          disabled={disabled || busy || history.length < 2}
+                          onChange={(event) => void viewHistoricalRevision(event.target.value)}
+                          value={historicalRevision?.id ?? ''}
+                        >
+                          <option value="">Select historical revision</option>
+                          {history.filter((revision) => revision.id !== selected.currentRevisionId).map((revision) => (
+                            <option key={revision.id} value={revision.id}>
+                              r{revision.revisionNumber} · {sourceLabel(revision.sourceKind)} · {shortHash(revision.contentSha256)}
+                            </option>
+                          ))}
+                        </select>
+                      </label>
+                      {revisionDiff ? (
+                        <div className="modelfile-diff-meta">
+                          <span className="status-pill status-muted">{revisionDiff.strategy}</span>
+                          {revisionDiff.truncated ? <span className="status-pill status-muted">Bounded output</span> : null}
+                        </div>
+                      ) : null}
+                    </div>
+                    {historicalRevision ? (
+                      <div className="modelfile-diff-evidence">
+                        <span>r{historicalRevision.revisionNumber} · {sourceLabel(historicalRevision.sourceKind)} · <code>{shortHash(historicalRevision.contentSha256)}</code></span>
+                        <span>→ r{selected.currentRevisionNumber} · {sourceLabel(selected.currentRevision.sourceKind)} · <code>{shortHash(selected.currentRevision.contentSha256)}</code></span>
+                      </div>
+                    ) : null}
+                    {!historicalRevision || !revisionDiff ? (
+                      <p className="models-notice">Choose an earlier immutable revision to compare.</p>
+                    ) : revisionDiff.changed ? (
+                      <div className="modelfile-diff-hunks">
+                        {revisionDiff.hunks.map((hunk, hunkIndex) => (
+                          <section className="modelfile-diff-hunk" key={`${hunk.oldStart}:${hunk.newStart}:${hunkIndex}`}>
+                            <div className="modelfile-diff-hunk-heading">@@ -{hunk.oldStart} +{hunk.newStart} @@</div>
+                            {hunk.lines.map((line, lineIndex) => (
+                              <div className={`modelfile-diff-line diff-${line.kind}`} key={`${line.oldLine}:${line.newLine}:${lineIndex}`}>
+                                <span className="diff-line-number">{line.oldLine ?? ''}</span>
+                                <span className="diff-line-number">{line.newLine ?? ''}</span>
+                                <span className="diff-marker">{line.kind === 'add' ? '+' : line.kind === 'remove' ? '-' : ' '}</span>
+                                <code>{line.text}</code>
+                                <small>{lineEndingLabel(line.ending)}</small>
+                              </div>
+                            ))}
+                          </section>
+                        ))}
+                      </div>
+                    ) : (
+                      <p className="modelfile-notice">The selected revisions are byte-identical.</p>
+                    )}
+                  </section>
+                ) : null}
+
+                {editorMode !== 'diff' ? (
+                  <div className="modelfile-revision-actions">
+                    <span className="muted">Base: <code>{shortHash(selected.currentRevision.contentSha256)}</code></span>
+                    <button className="primary-button" disabled={disabled || busy || !revisionRaw} type="submit">Create next revision</button>
+                  </div>
+                ) : null}
               </form>
 
               <div className="modelfile-history">
@@ -360,7 +464,7 @@ export default function LocalModelfilesPanel({
                 {history.map((revision) => (
                   <button
                     className="modelfile-history-row"
-                    disabled={disabled || busy}
+                    disabled={disabled || busy || revision.id === selected.currentRevisionId}
                     key={revision.id}
                     onClick={() => void viewHistoricalRevision(revision.id)}
                     type="button"
@@ -368,21 +472,10 @@ export default function LocalModelfilesPanel({
                     <strong>r{revision.revisionNumber}</strong>
                     <span>{sourceLabel(revision.sourceKind)}</span>
                     <code>{shortHash(revision.contentSha256)}</code>
-                    <small>{formatTimestamp(revision.createdAt)}</small>
+                    <small>{revision.id === selected.currentRevisionId ? 'Current' : formatTimestamp(revision.createdAt)}</small>
                   </button>
                 ))}
               </div>
-
-              {historicalRevision ? (
-                <section className="modelfile-history-preview">
-                  <div className="model-row-heading">
-                    <h4>Revision {historicalRevision.revisionNumber}</h4>
-                    <button className="secondary-button" onClick={() => setHistoricalRevision(null)} type="button">Close snapshot</button>
-                  </div>
-                  <p className="muted">Read-only historical source · <code>{historicalRevision.contentSha256}</code></p>
-                  <pre>{historicalRevision.rawText}</pre>
-                </section>
-              ) : null}
             </>
           ) : <p className="models-notice">Select or create a local Modelfile.</p>}
         </section>
