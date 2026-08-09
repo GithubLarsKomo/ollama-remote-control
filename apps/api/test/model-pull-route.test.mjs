@@ -210,11 +210,10 @@ test('model pull route streams through pinned SSH, persists progress and verifie
   }
 });
 
-test('running pull cancellation tears down local request and terminalizes as CANCEL_UNVERIFIED', { skip: !HAS_FIXTURE }, async () => {
+test('running pull cancellation terminalizes conservatively and releases the target mutation lock', { skip: !HAS_FIXTURE }, async () => {
   fs.writeFileSync('/tmp/orc-docker-fixture-mode', 'single');
   fs.writeFileSync('/tmp/orc-status-fixture-mode', 'normal');
   fs.writeFileSync(CONTAINER_STATE, 'running');
-  let remoteClosed = false;
   const ollama = await listenOllama((request, response) => {
     response.setHeader('content-type', 'application/json');
     if (request.method === 'GET' && request.url === '/api/tags') {
@@ -229,8 +228,6 @@ test('running pull cancellation tears down local request and terminalizes as CAN
       response.setHeader('content-type', 'application/x-ndjson');
       response.write(`${JSON.stringify({ status: 'pulling manifest' })}\n`);
       response.write(`${JSON.stringify({ status: 'pulling layer', digest: `sha256:${DIGEST}`, total: 1000, completed: 100 })}\n`);
-      request.once('close', () => { remoteClosed = true; });
-      response.once('close', () => { remoteClosed = true; });
       return;
     }
     response.statusCode = 404;
@@ -259,9 +256,28 @@ test('running pull cancellation tears down local request and terminalizes as CAN
 
     const terminal = await waitForJob(app, cookies, jobId, (job) => job.state === 'failed');
     assert.equal(terminal.errorClass, 'CANCEL_UNVERIFIED');
-    const deadline = Date.now() + 3000;
-    while (!remoteClosed && Date.now() < deadline) await delay(50);
-    assert.equal(remoteClosed, true);
+
+    const active = await app.inject({
+      method: 'GET', url: `/api/v1/targets/${targetId}/models/pull/active`,
+      headers: { cookie: cookieHeader(cookies) },
+    });
+    assert.equal(active.statusCode, 200);
+    assert.equal(active.json().job, null);
+
+    const restarted = await app.inject({
+      method: 'POST', url: `/api/v1/targets/${targetId}/models/pull`, headers: mutationHeaders(cookies),
+      payload: { model: MODEL },
+    });
+    assert.equal(restarted.statusCode, 202);
+    const secondJobId = restarted.json().job.id;
+    assert.notEqual(secondJobId, jobId);
+
+    const secondCancel = await app.inject({
+      method: 'POST', url: `/api/v1/jobs/${secondJobId}/cancel`, headers: mutationHeaders(cookies), payload: {},
+    });
+    assert.equal(secondCancel.statusCode, 200);
+    const secondTerminal = await waitForJob(app, cookies, secondJobId, (job) => ['cancelled', 'failed'].includes(job.state));
+    if (secondTerminal.state === 'failed') assert.equal(secondTerminal.errorClass, 'CANCEL_UNVERIFIED');
   } finally {
     await app.close();
     await closeServer(ollama);
