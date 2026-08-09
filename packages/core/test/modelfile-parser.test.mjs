@@ -6,19 +6,22 @@ import {
   replaceDirectiveArgument,
 } from '../dist/modelfile-parser.js';
 
-const KNOWN = ['FROM', 'PARAMETER', 'TEMPLATE', 'SYSTEM', 'ADAPTER', 'LICENSE', 'MESSAGE', 'REQUIRES'];
+const KNOWN = ['FROM', 'DRAFT', 'PARAMETER', 'TEMPLATE', 'SYSTEM', 'ADAPTER', 'LICENSE', 'MESSAGE', 'RENDERER', 'PARSER', 'REQUIRES'];
 
 test('parses all known directives while preserving exact LF source', () => {
   const raw = [
     '# top comment',
     '',
     'FROM llama3.2:latest',
+    'DRAFT assistant:latest',
     'PARAMETER temperature 0.7',
     'TEMPLATE """{{ .Prompt }}"""',
     'SYSTEM """You are useful."""',
     'ADAPTER hf.co/example/adapter:latest',
     'LICENSE """Example license"""',
     'MESSAGE user Hello',
+    'RENDERER qwen3.5',
+    'PARSER qwen3.5',
     'REQUIRES ollama >= 0.12',
     '',
   ].join('\n');
@@ -79,6 +82,27 @@ test('keeps multiline template/system/license/message blocks lossless and source
   assert.equal(multiline.map((node) => node.raw).join('').includes('{{ .Prompt }}'), true);
   assert.equal(renderModelfile(parsed), raw);
   assert.deepEqual(parsed.diagnostics, []);
+});
+
+test('current single-line DRAFT RENDERER and PARSER become raw-only if multiline syntax is encountered', () => {
+  const raw = [
+    'FROM base:latest',
+    'DRAFT """draft',
+    'model"""',
+    'RENDERER """renderer',
+    'name"""',
+    'PARSER parser1',
+  ].join('\n');
+  const parsed = parseModelfile(raw);
+  const draft = parsed.nodes.find((node) => node.kind === 'directive' && node.name === 'DRAFT');
+  const renderer = parsed.nodes.find((node) => node.kind === 'directive' && node.name === 'RENDERER');
+  const parser = parsed.nodes.find((node) => node.kind === 'directive' && node.name === 'PARSER');
+  assert(draft && renderer && parser);
+  assert.equal(draft.structuredEditable, false);
+  assert.equal(renderer.structuredEditable, false);
+  assert.equal(parser.structuredEditable, true);
+  assert.equal(parsed.diagnostics.filter((item) => item.code === 'DIRECTIVE_SINGLE_LINE_REQUIRED').length, 2);
+  assert.equal(renderModelfile(parsed), raw);
 });
 
 test('reports malformed or ambiguous source without destroying it', () => {

@@ -23,7 +23,13 @@ test('appends known directives using the document line ending without rewriting 
 test('refuses duplicate singleton directives but allows repeated parameters and adapters', () => {
   const parsed = parseModelfile('FROM base:latest\n');
   assert.throws(() => appendDirective(parsed, 'FROM', 'other:latest'), /already exists/u);
-  const withParameter = appendDirective(parsed, 'PARAMETER', 'temperature 0.7');
+  const withDraft = appendDirective(parsed, 'DRAFT', 'assistant:latest');
+  assert.throws(() => appendDirective(withDraft.parsed, 'DRAFT', 'other-assistant:latest'), /already exists/u);
+  const withRenderer = appendDirective(withDraft.parsed, 'RENDERER', 'qwen3.5');
+  assert.throws(() => appendDirective(withRenderer.parsed, 'RENDERER', 'other'), /already exists/u);
+  const withParser = appendDirective(withRenderer.parsed, 'PARSER', 'qwen3.5');
+  assert.throws(() => appendDirective(withParser.parsed, 'PARSER', 'other'), /already exists/u);
+  const withParameter = appendDirective(withParser.parsed, 'PARAMETER', 'temperature 0.7');
   const withSecondParameter = appendDirective(withParameter.parsed, 'PARAMETER', 'num_ctx 8192');
   const withAdapter = appendDirective(withSecondParameter.parsed, 'ADAPTER', 'one:latest');
   const withSecondAdapter = appendDirective(withAdapter.parsed, 'ADAPTER', 'two:latest');
