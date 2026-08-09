@@ -173,8 +173,9 @@ test('restart reconciliation verifies completed pull without replaying POST and 
       headers: { cookie: cookieHeader(cookies) },
     });
     assert.equal(reconciled.statusCode, 200);
-    assert.equal(reconciled.json().job.state, 'succeeded');
-    assert.equal(reconciled.json().job.errorClass, null);
+    const reconciledJob = reconciled.json().job;
+    assert.equal(reconciledJob.state, 'succeeded', `reconciled job: ${JSON.stringify(reconciledJob)}`);
+    assert.equal(reconciledJob.errorClass, null);
     assert.equal(state.pullRequests, 1, 'startup reconciliation must never replay POST /api/pull');
 
     const active = await app.inject({
