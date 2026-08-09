@@ -12,6 +12,10 @@
       "types": "./dist/host-catalog.d.ts",
       "import": "./dist/host-catalog.js"
     },
+    "./modelfiles": {
+      "types": "./dist/modelfiles.d.ts",
+      "import": "./dist/modelfiles.js"
+    },
     "./target-binding": {
       "types": "./dist/target-binding.d.ts",
       "import": "./dist/target-binding.js"

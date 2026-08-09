@@ -7,6 +7,10 @@
     ".": {
       "types": "./dist/index.d.ts",
       "import": "./dist/index.js"
+    },
+    "./modelfiles": {
+      "types": "./dist/modelfiles.d.ts",
+      "import": "./dist/modelfiles.js"
     }
   }
 }

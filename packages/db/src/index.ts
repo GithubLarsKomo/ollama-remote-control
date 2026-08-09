@@ -52,6 +52,7 @@ const migrations: readonly Migration[] = [
   { version: 5, name: 'target-binding', source: new URL('../migrations/0005_target_binding.sql', import.meta.url) },
   { version: 6, name: 'jobs-audit', source: new URL('../migrations/0006_jobs_audit.sql', import.meta.url) },
   { version: 7, name: 'update-snapshots', source: new URL('../migrations/0007_update_snapshots.sql', import.meta.url) },
+  { version: 8, name: 'modelfile-library', source: new URL('../migrations/0008_modelfile_library.sql', import.meta.url) },
 ];
 
 export function openDatabase(filename: string): DatabaseConnection {

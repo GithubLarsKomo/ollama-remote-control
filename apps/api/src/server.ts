@@ -19,6 +19,7 @@ import {
   SqliteUpdateSnapshotRepository,
 } from '@orc/db';
 import { SqliteHostCatalogRepository } from '@orc/db/host-catalog';
+import { SqliteModelfileRepository } from '@orc/db/modelfiles';
 import { SqliteTargetContainerBindingRepository } from '@orc/db/target-binding';
 import { SqliteTargetCatalogRepository } from '@orc/db/target-catalog';
 import { DockerDiscoveryError, type DockerLifecycleAction } from '@orc/docker';
@@ -58,6 +59,13 @@ import {
   TargetLogError,
   TargetLogService,
 } from './logs.js';
+import {
+  ModelfileLibraryError,
+  ModelfileLibraryService,
+  type AppendModelfileRevisionInput,
+  type CreateModelfileInput,
+  type ImportInstalledModelfileInput,
+} from './modelfile-library.js';
 import {
   OllamaHealthError,
   OllamaHealthService,
@@ -128,6 +136,8 @@ interface ContainerLifecycleBody { readonly confirmation?: ContainerLifecycleCon
 interface UpdateIntentBody { readonly snapshotId?: unknown; }
 interface HostParams { readonly hostId: string; }
 interface TargetParams { readonly targetId: string; }
+interface ModelfileParams { readonly modelfileId: string; }
+interface ModelfileRevisionParams extends ModelfileParams { readonly revisionId: string; }
 interface SnapshotQuery { readonly snapshotId?: unknown; }
 interface ModelDetailQuery { readonly model?: unknown; }
 interface LogQuery { readonly tail?: unknown; }
@@ -186,6 +196,7 @@ function sendApiError(reply: FastifyReply, error: unknown): FastifyReply {
     || error instanceof TargetDiscoveryError
     || error instanceof TargetStatusError
     || error instanceof TargetLogError
+    || error instanceof ModelfileLibraryError
     || error instanceof OllamaHealthError
     || error instanceof OllamaModelDetailError
     || error instanceof OllamaModelInventoryError
@@ -228,6 +239,7 @@ export function buildServer(options: BuildServerOptions = {}): FastifyInstance {
   const targetCatalogRepository = new SqliteTargetCatalogRepository(database);
   const targetBindingRepository = new SqliteTargetContainerBindingRepository(database);
   const snapshotRepository = new SqliteUpdateSnapshotRepository(database);
+  const modelfileRepository = new SqliteModelfileRepository(database);
   const jobService = new JobService(new SqliteJobRepository(database), now);
   const auditService = new AuditService(new SqliteAuditRepository(database), now);
   const hosts = new HostOnboardingService(hostRepository, masterKey, now);
@@ -237,6 +249,7 @@ export function buildServer(options: BuildServerOptions = {}): FastifyInstance {
   const ollamaHealth = new OllamaHealthService(hostRepository, credentialRepository, targetRepository, masterKey);
   const ollamaModels = new OllamaModelInventoryService(hostRepository, credentialRepository, targetRepository, masterKey);
   const ollamaModelDetails = new OllamaModelDetailService(hostRepository, credentialRepository, targetRepository, masterKey);
+  const modelfiles = new ModelfileLibraryService(modelfileRepository, auditService, ollamaModelDetails, now);
   const updateRemoteFactory = options.updateRemoteFactory ?? createSshUpdateRemoteFactory(ollamaHealth);
   const containerLifecycle = new ContainerLifecycleService(
     hostRepository,
@@ -358,6 +371,50 @@ export function buildServer(options: BuildServerOptions = {}): FastifyInstance {
     try { auth.logout(requireAuthenticatedMutation(request)); reply.header('set-cookie', clearSessionCookies()); return reply.code(204).send(); }
     catch (error) { return sendApiError(reply, error); }
   });
+
+  app.get('/api/v1/modelfiles', async (request, reply) => {
+    try {
+      requireAuthenticated(request);
+      return reply.send({ modelfiles: modelfiles.list() });
+    } catch (error) { return sendApiError(reply, error); }
+  });
+  app.get<{ Params: ModelfileParams }>('/api/v1/modelfiles/:modelfileId', async (request, reply) => {
+    try {
+      requireAuthenticated(request);
+      return reply.send({ modelfile: modelfiles.read(request.params.modelfileId) });
+    } catch (error) { return sendApiError(reply, error); }
+  });
+  app.get<{ Params: ModelfileParams }>('/api/v1/modelfiles/:modelfileId/revisions', async (request, reply) => {
+    try {
+      requireAuthenticated(request);
+      return reply.send({ revisions: modelfiles.listRevisions(request.params.modelfileId) });
+    } catch (error) { return sendApiError(reply, error); }
+  });
+  app.get<{ Params: ModelfileRevisionParams }>('/api/v1/modelfiles/:modelfileId/revisions/:revisionId', async (request, reply) => {
+    try {
+      requireAuthenticated(request);
+      return reply.send({ revision: modelfiles.readRevision(request.params.modelfileId, request.params.revisionId) });
+    } catch (error) { return sendApiError(reply, error); }
+  });
+  app.post<{ Body: CreateModelfileInput }>('/api/v1/modelfiles', async (request, reply) => {
+    try {
+      const session = requireAuthenticatedMutation(request);
+      return reply.code(201).send({ modelfile: modelfiles.createManual(session.userId, request.body) });
+    } catch (error) { return sendApiError(reply, error); }
+  });
+  app.post<{ Params: ModelfileParams; Body: AppendModelfileRevisionInput }>('/api/v1/modelfiles/:modelfileId/revisions', async (request, reply) => {
+    try {
+      const session = requireAuthenticatedMutation(request);
+      return reply.code(201).send({ modelfile: modelfiles.append(session.userId, request.params.modelfileId, request.body) });
+    } catch (error) { return sendApiError(reply, error); }
+  });
+  app.post<{ Body: ImportInstalledModelfileInput }>('/api/v1/modelfiles/import-installed', async (request, reply) => {
+    try {
+      const session = requireAuthenticatedMutation(request);
+      return reply.code(201).send({ modelfile: await modelfiles.importInstalled(session.userId, request.body) });
+    } catch (error) { return sendApiError(reply, error); }
+  });
+
   app.get('/api/v1/hosts', async (request, reply) => {
     try { requireAuthenticated(request); return reply.send({ hosts: hostCatalogRepository.listEnabled() }); }
     catch (error) { return sendApiError(reply, error); }
@@ -396,8 +453,8 @@ export function buildServer(options: BuildServerOptions = {}): FastifyInstance {
     catch (error) { return sendApiError(reply, error); }
   });
   app.get('/api/v1/targets', async (request, reply) => {
-    try { requireAuthenticated(request); return reply.send({ targets: targetCatalogRepository.listEnabled() }); }
-    catch (error) { return sendApiError(reply, error); }
+    try { requireAuthenticated(request); return reply.send({ targets: targetCatalogRepository.listEnabled() });
+    } catch (error) { return sendApiError(reply, error); }
   });
   app.get<{ Params: TargetParams }>('/api/v1/targets/:targetId/status', async (request, reply) => {
     try {
@@ -537,7 +594,6 @@ export function buildServer(options: BuildServerOptions = {}): FastifyInstance {
     );
     remoteStream.start();
   });
-
   app.addHook('onClose', async () => { database.close(); });
   return app;
 }

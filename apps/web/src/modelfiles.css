@@ -1,0 +1,270 @@
+.local-modelfiles {
+  margin-top: 1.5rem;
+  border-top: 1px solid rgba(100, 116, 139, 0.55);
+  padding-top: 1.25rem;
+}
+
+.local-modelfiles-heading,
+.modelfile-editor-heading,
+.modelfile-revision-actions {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.local-modelfiles-heading h3,
+.local-modelfiles-heading p,
+.modelfile-editor-heading h4,
+.modelfile-editor-heading p {
+  margin-bottom: 0.25rem;
+}
+
+.local-modelfiles-heading button {
+  width: auto;
+  flex: none;
+}
+
+.modelfile-notice {
+  margin: 1rem 0 0;
+  border: 1px solid #356f5a;
+  border-radius: 0.75rem;
+  background: #0d2b21;
+  padding: 0.75rem 0.9rem;
+  color: #c8f7e2;
+}
+
+.modelfile-create-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 1rem;
+  margin-top: 1rem;
+}
+
+.modelfile-form,
+.modelfile-editor {
+  border: 1px solid #344258;
+  border-radius: 0.85rem;
+  background: #0b1220;
+  padding: 1rem;
+}
+
+.modelfile-form h4,
+.modelfile-editor h4,
+.modelfile-history h4 {
+  margin: 0 0 0.75rem;
+}
+
+.modelfile-form label,
+.modelfile-revision-form label {
+  display: grid;
+  gap: 0.35rem;
+  margin-top: 0.75rem;
+  color: #bdc9da;
+  font-size: 0.78rem;
+  font-weight: 700;
+}
+
+.modelfile-form input,
+.modelfile-form select,
+.modelfile-form textarea,
+.modelfile-revision-form textarea {
+  width: 100%;
+  box-sizing: border-box;
+  border: 1px solid #42516a;
+  border-radius: 0.65rem;
+  background: #080e19;
+  padding: 0.65rem 0.72rem;
+  color: #e2e8f0;
+  font: inherit;
+}
+
+.modelfile-form textarea,
+.modelfile-revision-form textarea {
+  resize: vertical;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 0.78rem;
+  line-height: 1.5;
+  tab-size: 2;
+}
+
+.modelfile-form button {
+  margin-top: 0.85rem;
+}
+
+.modelfile-library-grid {
+  display: grid;
+  grid-template-columns: minmax(240px, 0.8fr) minmax(0, 2.2fr);
+  gap: 1rem;
+  margin-top: 1rem;
+}
+
+.modelfile-list {
+  min-width: 0;
+}
+
+.modelfile-artifacts {
+  display: grid;
+  gap: 0.5rem;
+  margin-top: 0.65rem;
+}
+
+.modelfile-artifact {
+  display: grid;
+  gap: 0.2rem;
+  width: 100%;
+  border: 1px solid #344258;
+  border-radius: 0.75rem;
+  background: #0c1422;
+  padding: 0.75rem;
+  text-align: left;
+  color: #dbe4f0;
+  cursor: pointer;
+}
+
+.modelfile-artifact:hover:not(:disabled),
+.modelfile-artifact.selected {
+  border-color: #7185a8;
+  background: #182338;
+}
+
+.modelfile-artifact span,
+.modelfile-artifact small {
+  color: #96a5bc;
+  font-size: 0.72rem;
+}
+
+.modelfile-editor {
+  min-width: 0;
+}
+
+.modelfile-import-evidence {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0.65rem;
+  margin: 1rem 0;
+}
+
+.modelfile-import-evidence > div {
+  min-width: 0;
+  border: 1px solid #344258;
+  border-radius: 0.65rem;
+  background: #101827;
+  padding: 0.65rem;
+}
+
+.modelfile-import-evidence dt {
+  margin-bottom: 0.2rem;
+  color: #8fa0b8;
+  font-size: 0.66rem;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+.modelfile-import-evidence dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+  color: #dbe4f0;
+  font-size: 0.76rem;
+}
+
+.modelfile-import-evidence code {
+  font-size: 0.7rem;
+}
+
+.modelfile-revision-form {
+  margin-top: 1rem;
+}
+
+.modelfile-revision-actions {
+  align-items: center;
+  margin-top: 0.7rem;
+}
+
+.modelfile-revision-actions button {
+  width: auto;
+}
+
+.modelfile-history {
+  margin-top: 1.25rem;
+  border-top: 1px solid rgba(71, 85, 105, 0.55);
+  padding-top: 1rem;
+}
+
+.modelfile-history-row {
+  display: grid;
+  grid-template-columns: 3rem minmax(8rem, 1fr) minmax(8rem, 1fr) auto;
+  gap: 0.65rem;
+  align-items: center;
+  width: 100%;
+  border: 0;
+  border-bottom: 1px solid rgba(71, 85, 105, 0.4);
+  background: transparent;
+  padding: 0.65rem 0.2rem;
+  text-align: left;
+  color: #dbe4f0;
+  cursor: pointer;
+}
+
+.modelfile-history-row:hover:not(:disabled) {
+  background: #121c2c;
+}
+
+.modelfile-history-row span,
+.modelfile-history-row small,
+.modelfile-history-row code {
+  color: #96a5bc;
+  font-size: 0.72rem;
+  overflow-wrap: anywhere;
+}
+
+.modelfile-history-preview {
+  margin-top: 1rem;
+  border: 1px solid #465875;
+  border-radius: 0.75rem;
+  background: #080e19;
+  padding: 0.85rem;
+}
+
+.modelfile-history-preview .secondary-button {
+  width: auto;
+}
+
+.modelfile-history-preview pre {
+  max-height: 30rem;
+  overflow: auto;
+  margin: 0.75rem 0 0;
+  border: 1px solid #344258;
+  border-radius: 0.65rem;
+  background: #050911;
+  padding: 0.75rem;
+  color: #dbe4f0;
+  font: 0.76rem/1.5 ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  white-space: pre;
+}
+
+@media (max-width: 900px) {
+  .modelfile-create-grid,
+  .modelfile-library-grid,
+  .modelfile-import-evidence {
+    grid-template-columns: 1fr;
+  }
+
+  .modelfile-history-row {
+    grid-template-columns: 3rem 1fr;
+  }
+}
+
+@media (max-width: 640px) {
+  .local-modelfiles-heading,
+  .modelfile-editor-heading,
+  .modelfile-revision-actions {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .local-modelfiles-heading button,
+  .modelfile-revision-actions button {
+    width: 100%;
+  }
+}
