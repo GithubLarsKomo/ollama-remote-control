@@ -168,7 +168,7 @@ function mapUpdateSnapshot(row: Record<string, unknown> | undefined): StoredUpda
 }
 function insertCredential(database: DatabaseConnection, credential: StoredSshCredential): void {
   const encrypted = credential.encryptedPrivateKey;
-  database.prepare(`INSERT INTO ssh_credentials(id, host_id, algorithm, key_version, nonce, ciphertext, auth_tag, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(credential.id, credential.hostId, encrypted.algorithm, encrypted.keyVersion, encrypted.nonce, encrypted.ciphertext, encrypted.authTag, encrypted.createdAt, encrypted.updatedAt);
+  database.prepare(`INSERT INTO ssh_credentials(id, host_id, algorithm, key_version, nonce, ciphertext, auth_tag, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(credential.id, credential.hostId, encrypted.algorithm, encrypted.keyVersion, encrypted.nonce, encrypted.ciphertext, encrypted.authTag, credential.createdAt, credential.updatedAt);
 }
 function nextJobEventSequence(database: DatabaseConnection, jobId: string): number {
   return Number(database.prepare('SELECT COALESCE(MAX(sequence), 0) + 1 AS sequence FROM job_events WHERE job_id = ?').get(jobId)?.sequence ?? 1);
