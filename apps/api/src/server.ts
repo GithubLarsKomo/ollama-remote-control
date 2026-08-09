@@ -63,6 +63,10 @@ import {
   OllamaHealthService,
 } from './ollama-health.js';
 import {
+  OllamaModelDetailError,
+  OllamaModelDetailService,
+} from './ollama-model-details.js';
+import {
   OllamaModelInventoryError,
   OllamaModelInventoryService,
 } from './ollama-models.js';
@@ -125,6 +129,7 @@ interface UpdateIntentBody { readonly snapshotId?: unknown; }
 interface HostParams { readonly hostId: string; }
 interface TargetParams { readonly targetId: string; }
 interface SnapshotQuery { readonly snapshotId?: unknown; }
+interface ModelDetailQuery { readonly model?: unknown; }
 interface LogQuery { readonly tail?: unknown; }
 interface LoginBucket { failures: number; resetAt: number; }
 
@@ -182,6 +187,7 @@ function sendApiError(reply: FastifyReply, error: unknown): FastifyReply {
     || error instanceof TargetStatusError
     || error instanceof TargetLogError
     || error instanceof OllamaHealthError
+    || error instanceof OllamaModelDetailError
     || error instanceof OllamaModelInventoryError
     || error instanceof ContainerLifecycleError
     || error instanceof JobServiceError
@@ -230,6 +236,7 @@ export function buildServer(options: BuildServerOptions = {}): FastifyInstance {
   const targetLogs = new TargetLogService(hostRepository, credentialRepository, targetRepository, masterKey);
   const ollamaHealth = new OllamaHealthService(hostRepository, credentialRepository, targetRepository, masterKey);
   const ollamaModels = new OllamaModelInventoryService(hostRepository, credentialRepository, targetRepository, masterKey);
+  const ollamaModelDetails = new OllamaModelDetailService(hostRepository, credentialRepository, targetRepository, masterKey);
   const updateRemoteFactory = options.updateRemoteFactory ?? createSshUpdateRemoteFactory(ollamaHealth);
   const containerLifecycle = new ContainerLifecycleService(
     hostRepository,
@@ -408,6 +415,12 @@ export function buildServer(options: BuildServerOptions = {}): FastifyInstance {
     try {
       requireAuthenticated(request);
       return reply.send(await ollamaModels.read(request.params.targetId));
+    } catch (error) { return sendApiError(reply, error); }
+  });
+  app.get<{ Params: TargetParams; Querystring: ModelDetailQuery }>('/api/v1/targets/:targetId/model-details', async (request, reply) => {
+    try {
+      requireAuthenticated(request);
+      return reply.send(await ollamaModelDetails.read(request.params.targetId, request.query?.model));
     } catch (error) { return sendApiError(reply, error); }
   });
 
