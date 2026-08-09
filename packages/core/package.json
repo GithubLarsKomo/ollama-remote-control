@@ -12,6 +12,10 @@
       "types": "./dist/modelfile-diff.d.ts",
       "import": "./dist/modelfile-diff.js"
     },
+    "./modelfile-editor": {
+      "types": "./dist/modelfile-editor.d.ts",
+      "import": "./dist/modelfile-editor.js"
+    },
     "./modelfile-parser": {
       "types": "./dist/modelfile-parser.d.ts",
       "import": "./dist/modelfile-parser.js"
