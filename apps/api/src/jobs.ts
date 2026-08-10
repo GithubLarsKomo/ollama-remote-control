@@ -34,7 +34,7 @@ export interface CreateJobInput {
 }
 
 export interface TransitionJobInput {
-  readonly result?: Readonly<Record<string, unknown>> | null;
+  readonly result?: Readonly<object> | null;
   readonly errorClass?: string | null;
   readonly exitCode?: number | null;
 }
