@@ -194,11 +194,12 @@ export class ModelfileValidationService {
     );
     let preflight: PreflightValidationNotRun | PreflightValidationPassed = { state: 'not-run' };
     if (plan) {
+      const expiresAtMs = Date.parse(plan.expiresAt);
       const authorityState: DeployPlanAuthorityState = plan.selectedContainerId !== target.selectedContainerId
         ? 'stale-binding'
         : plan.consumedAt !== null
           ? 'consumed'
-          : Date.parse(plan.expiresAt) <= this.now().getTime()
+          : !Number.isFinite(expiresAtMs) || expiresAtMs <= this.now().getTime()
             ? 'expired'
             : 'usable';
       preflight = {
