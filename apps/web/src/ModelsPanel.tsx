@@ -10,6 +10,7 @@ import {
 } from './api.js';
 import { formatBytes, formatTimestamp } from './format.js';
 import LocalModelfilesPanel from './LocalModelfilesPanel.js';
+import ModelCreatePanel from './ModelCreatePanel.js';
 import ModelDetailsPanel from './ModelDetailsPanel.js';
 import ModelPullPanel from './ModelPullPanel.js';
 import {
@@ -125,6 +126,13 @@ export default function ModelsPanel({ status, disabled, onSignedOut }: ModelsPan
       </div>
 
       <ModelPullPanel
+        disabled={disabled || busy || !status.container.running}
+        onSignedOut={onSignedOut}
+        onSucceeded={load}
+        targetId={status.target.id}
+      />
+
+      <ModelCreatePanel
         disabled={disabled || busy || !status.container.running}
         onSignedOut={onSignedOut}
         onSucceeded={load}
