@@ -2,6 +2,7 @@ import { pathToFileURL } from 'node:url';
 import { registerModelCreateFeature } from './model-create-feature.js';
 import { registerModelSourceFeature } from './model-source-feature.js';
 import { registerModelUnloadFeature } from './model-unload-feature.js';
+import { registerModelfilePortabilityFeature } from './modelfile-portability-feature.js';
 import { buildServer } from './server.js';
 import { registerWebAssets } from './web-assets.js';
 
@@ -22,6 +23,9 @@ export function buildProductionServer(environment: NodeJS.ProcessEnv = process.e
   registerModelUnloadFeature(app, {
     databasePath,
     environment,
+  });
+  registerModelfilePortabilityFeature(app, {
+    databasePath,
   });
   registerWebAssets(app, environment.ORC_WEB_DIST_PATH ?? null);
   return app;
