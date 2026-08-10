@@ -8,6 +8,10 @@
       "types": "./dist/index.d.ts",
       "import": "./dist/index.js"
     },
+    "./model-source": {
+      "types": "./dist/model-source.d.ts",
+      "import": "./dist/model-source.js"
+    },
     "./modelfile-deploy": {
       "types": "./dist/modelfile-deploy.d.ts",
       "import": "./dist/modelfile-deploy.js"
