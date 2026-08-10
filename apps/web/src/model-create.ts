@@ -92,6 +92,10 @@ export function confirmModelfileDeploy(
   });
 }
 
+export function readActiveModelCreateJob(targetId: string): Promise<{ readonly job: PublicCreateJob | null }> {
+  return requestJson(`/api/v1/targets/${encodeURIComponent(targetId)}/model-create/active`);
+}
+
 export function readModelCreateJob(jobId: string): Promise<{ readonly job: PublicCreateJob }> {
   return requestJson(`/api/v1/model-create-jobs/${encodeURIComponent(jobId)}`);
 }
