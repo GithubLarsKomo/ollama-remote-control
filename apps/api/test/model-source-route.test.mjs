@@ -1,0 +1,204 @@
+import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import http from 'node:http';
+import os from 'node:os';
+import path from 'node:path';
+import test from 'node:test';
+import { registerModelSourceFeature } from '../dist/model-source-feature.js';
+import { buildServer } from '../dist/server.js';
+
+const SSH_HOST = process.env.SSH_HOST;
+const SSH_PORT = Number(process.env.SSH_PORT ?? '2222');
+const SSH_USER = process.env.SSH_USER;
+const SSH_PRIVATE_KEY_PATH = process.env.SSH_PRIVATE_KEY_PATH;
+const DOCKER_FIXTURE_LOG = process.env.ORC_DOCKER_FIXTURE_LOG;
+const CONTAINER_STATE = process.env.ORC_CONTAINER_STATE;
+const HAS_FIXTURE = Boolean(SSH_HOST && SSH_USER && SSH_PRIVATE_KEY_PATH && DOCKER_FIXTURE_LOG && CONTAINER_STATE);
+const MASTER_KEY = Buffer.alloc(32, 0x58);
+const PASSWORD = 'model-source-admin-password!';
+const MODEL = 'hf.co/unsloth/Qwen3.5-9B-GGUF:UD-Q4_K_XL';
+const DIGEST = 'd'.repeat(64);
+
+function cookiesFrom(response) {
+  const header = response.headers['set-cookie'];
+  const values = Array.isArray(header) ? header : header ? [header] : [];
+  const cookies = {};
+  for (const value of values) {
+    const [pair] = value.split(';');
+    const separator = pair.indexOf('=');
+    cookies[pair.slice(0, separator)] = decodeURIComponent(pair.slice(separator + 1));
+  }
+  return cookies;
+}
+
+function cookieHeader(cookies) {
+  return Object.entries(cookies).map(([name, value]) => `${name}=${encodeURIComponent(value)}`).join('; ');
+}
+
+function mutationHeaders(cookies) {
+  return { cookie: cookieHeader(cookies), 'x-csrf-token': cookies.orc_csrf };
+}
+
+async function authenticate(app) {
+  const setup = await app.inject({
+    method: 'POST', url: '/api/v1/setup/admin', payload: { username: 'admin', password: PASSWORD },
+  });
+  assert.equal(setup.statusCode, 201);
+  const login = await app.inject({
+    method: 'POST', url: '/api/v1/session', payload: { username: 'admin', password: PASSWORD },
+  });
+  assert.equal(login.statusCode, 200);
+  return cookiesFrom(login);
+}
+
+async function onboard(app, cookies) {
+  const probe = await app.inject({
+    method: 'POST', url: '/api/v1/hosts/probe', headers: mutationHeaders(cookies),
+    payload: { hostname: SSH_HOST, port: SSH_PORT },
+  });
+  assert.equal(probe.statusCode, 200);
+  const created = await app.inject({
+    method: 'POST', url: '/api/v1/hosts', headers: mutationHeaders(cookies),
+    payload: {
+      displayName: 'Source fixture', hostname: SSH_HOST, port: SSH_PORT, username: SSH_USER,
+      confirmedFingerprint: probe.json().fingerprint,
+      privateKey: fs.readFileSync(SSH_PRIVATE_KEY_PATH, 'utf8'),
+    },
+  });
+  assert.equal(created.statusCode, 201);
+  const selected = await app.inject({
+    method: 'POST', url: `/api/v1/hosts/${created.json().host.id}/targets`, headers: mutationHeaders(cookies),
+    payload: { containerId: 'ollama-container-id', displayName: 'Primary Ollama' },
+  });
+  assert.equal(selected.statusCode, 201);
+  return selected.json().target.id;
+}
+
+async function readJsonRequest(request) {
+  const chunks = [];
+  for await (const chunk of request) chunks.push(Buffer.from(chunk));
+  return JSON.parse(Buffer.concat(chunks).toString('utf8'));
+}
+
+async function listenOllama(handler) {
+  const server = http.createServer(handler);
+  await new Promise((resolve, reject) => {
+    server.once('error', reject);
+    server.listen(11434, '127.0.0.1', resolve);
+  });
+  return server;
+}
+
+async function closeServer(server) {
+  if (typeof server.closeAllConnections === 'function') server.closeAllConnections();
+  await new Promise((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
+}
+
+test('source route resolves observed hf.co identity while refusing local generated blobs', { skip: !HAS_FIXTURE }, async () => {
+  fs.writeFileSync('/tmp/orc-docker-fixture-mode', 'single');
+  fs.writeFileSync('/tmp/orc-status-fixture-mode', 'normal');
+  fs.writeFileSync(CONTAINER_STATE, 'running');
+  fs.writeFileSync(DOCKER_FIXTURE_LOG, '');
+  const requests = [];
+  const ollama = await listenOllama(async (request, response) => {
+    response.setHeader('content-type', 'application/json');
+    if (request.method === 'GET' && request.url === '/api/tags') {
+      requests.push({ method: request.method, url: request.url, body: null });
+      response.end(JSON.stringify({ models: [{
+        name: MODEL,
+        model: MODEL,
+        modified_at: '2026-08-10T00:00:00Z',
+        size: 4096,
+        digest: DIGEST,
+        details: {
+          format: 'gguf', family: 'qwen3', families: ['qwen3'],
+          parameter_size: '9B', quantization_level: 'Q4',
+        },
+      }] }));
+      return;
+    }
+    if (request.method === 'POST' && request.url === '/api/show') {
+      const body = await readJsonRequest(request);
+      requests.push({ method: request.method, url: request.url, body });
+      response.end(JSON.stringify({
+        modelfile: [
+          '# generated by Ollama',
+          'FROM /root/.ollama/models/blobs/sha256:deadbeef',
+          'ADAPTER hf.co/example/adapter-repo:Q4_K_M',
+          'ADAPTER /srv/local/adapter.gguf',
+        ].join('\n'),
+        details: { parent_model: '' },
+        capabilities: ['completion'],
+        model_info: { 'general.architecture': 'qwen3' },
+      }));
+      return;
+    }
+    response.statusCode = 404;
+    response.end('{}');
+  });
+
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'orc-model-source-route-'));
+  const databasePath = path.join(directory, 'app.sqlite');
+  const environment = { ORC_MASTER_KEY: MASTER_KEY.toString('base64') };
+  const app = buildServer({ databasePath, environment });
+  registerModelSourceFeature(app, { databasePath, environment });
+  try {
+    const unauthenticated = await app.inject({
+      method: 'GET', url: `/api/v1/targets/missing/model-sources?model=${encodeURIComponent(MODEL)}`,
+    });
+    assert.equal(unauthenticated.statusCode, 401);
+
+    const cookies = await authenticate(app);
+    const targetId = await onboard(app, cookies);
+    fs.writeFileSync(DOCKER_FIXTURE_LOG, '');
+    requests.length = 0;
+
+    const response = await app.inject({
+      method: 'GET',
+      url: `/api/v1/targets/${targetId}/model-sources?model=${encodeURIComponent(MODEL)}`,
+      headers: { cookie: cookieHeader(cookies) },
+    });
+    assert.equal(response.statusCode, 200);
+    assert.deepEqual(response.json(), {
+      targetId,
+      model: MODEL,
+      sources: {
+        model: {
+          reference: MODEL,
+          state: 'resolved',
+          provider: 'huggingface',
+          url: 'https://huggingface.co/unsloth/Qwen3.5-9B-GGUF',
+        },
+        from: {
+          reference: '/root/.ollama/models/blobs/sha256:deadbeef',
+          state: 'local-artifact',
+          provider: null,
+          url: null,
+        },
+        adapters: [
+          {
+            reference: 'hf.co/example/adapter-repo:Q4_K_M',
+            state: 'resolved',
+            provider: 'huggingface',
+            url: 'https://huggingface.co/example/adapter-repo',
+          },
+          {
+            reference: '/srv/local/adapter.gguf',
+            state: 'local-artifact',
+            provider: null,
+            url: null,
+          },
+        ],
+      },
+    });
+    assert.deepEqual(requests, [
+      { method: 'GET', url: '/api/tags', body: null },
+      { method: 'POST', url: '/api/show', body: { model: MODEL, verbose: false } },
+    ]);
+    const dockerCalls = fs.readFileSync(DOCKER_FIXTURE_LOG, 'utf8').trim().split(/\r?\n/u).filter(Boolean);
+    assert.deepEqual(dockerCalls, ['inspect ollama-container-id']);
+  } finally {
+    await app.close();
+    await closeServer(ollama);
+  }
+});
