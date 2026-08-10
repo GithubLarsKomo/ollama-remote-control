@@ -42,6 +42,22 @@ export interface ProvenanceReferencePreview {
   readonly kind: ProvenanceReferenceKind;
 }
 
+export interface ModelSourceResolutionView {
+  readonly reference: string;
+  readonly state: 'resolved' | 'local-artifact' | 'unresolved';
+  readonly provider: 'huggingface' | null;
+  readonly url: string | null;
+}
+
+export interface ModelSourceView {
+  readonly targetId: string;
+  readonly model: string;
+  readonly sources: {
+    readonly from: ModelSourceResolutionView | null;
+    readonly adapters: readonly ModelSourceResolutionView[];
+  };
+}
+
 export interface ModelDetailView {
   readonly targetId: string;
   readonly transport: { readonly mode: 'published-binding' | 'container-network' };
@@ -114,6 +130,19 @@ export async function fetchModelDetail(targetId: string, modelName: string): Pro
   );
   if (response.ok) return await response.json() as ModelDetailView;
   return safeJsonError(response, 'HTTP_ERROR', `Model detail failed with HTTP ${response.status}.`);
+}
+
+export async function fetchModelSources(targetId: string, modelName: string): Promise<ModelSourceView> {
+  const response = await fetch(
+    `/api/v1/targets/${encodeURIComponent(targetId)}/model-sources?model=${encodeURIComponent(modelName)}`,
+    {
+      method: 'GET',
+      credentials: 'include',
+      headers: { accept: 'application/json' },
+    },
+  );
+  if (response.ok) return await response.json() as ModelSourceView;
+  return safeJsonError(response, 'HTTP_ERROR', `Model source lookup failed with HTTP ${response.status}.`);
 }
 
 export interface ModelInventorySummary {
