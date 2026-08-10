@@ -14,7 +14,7 @@ export interface CompiledOllamaCreatePayload {
   readonly from: string;
   readonly template?: string;
   readonly system?: string;
-  readonly license?: string | readonly string[];
+  readonly license?: string;
   readonly parameters?: Readonly<Record<string, unknown>>;
   readonly messages?: readonly OllamaCreateMessage[];
   readonly renderer?: string;
@@ -50,7 +50,7 @@ function directives(parsed: ParsedModelfile): readonly ModelfileDirectiveNode[] 
   return parsed.nodes.filter((node): node is ModelfileDirectiveNode => node.kind === 'directive');
 }
 
-function canonicalModelName(value: string): string {
+export function canonicalOllamaModelName(value: string): string {
   const slash = value.lastIndexOf('/');
   const colon = value.lastIndexOf(':');
   return colon > slash ? value : `${value}:latest`;
@@ -74,7 +74,7 @@ function validateBaseModel(argument: string): string {
       'FROM must reference an installed Ollama model name for this deploy mode.',
     );
   }
-  return canonicalModelName(value);
+  return canonicalOllamaModelName(value);
 }
 
 function singleton(nodes: readonly ModelfileDirectiveNode[], name: ModelfileDirectiveNode['name']): ModelfileDirectiveNode | undefined {
@@ -91,7 +91,7 @@ function unquotedText(node: ModelfileDirectiveNode): string {
   return value;
 }
 
-function parameterScalar(raw: string): unknown {
+export function normalizeOllamaParameterScalar(raw: string): unknown {
   const value = raw.trim();
   if (!value || value.length > MAX_PARAMETER_VALUE) {
     throw new ModelfileDeployCompileError('DEPLOY_PARAMETER_INVALID', 'PARAMETER value is empty or too large.');
@@ -120,7 +120,7 @@ function compileParameters(nodes: readonly ModelfileDirectiveNode[]): Readonly<R
       throw new ModelfileDeployCompileError('DEPLOY_PARAMETER_INVALID', 'PARAMETER must contain a bounded name and single-line value.');
     }
     const key = pair.key;
-    const value = parameterScalar(pair.value);
+    const value = normalizeOllamaParameterScalar(pair.value);
     if (key === 'stop') {
       const existing = result[key];
       result[key] = existing === undefined ? value : Array.isArray(existing) ? [...existing, value] : [existing, value];
@@ -153,12 +153,16 @@ function compileMessages(nodes: readonly ModelfileDirectiveNode[]): readonly Oll
   return messages.length ? messages : undefined;
 }
 
-function compileLicenses(nodes: readonly ModelfileDirectiveNode[]): string | readonly string[] | undefined {
-  const licenses = nodes
-    .filter((node) => node.name === 'LICENSE')
-    .map((node) => unquotedText(node));
+function compileLicense(nodes: readonly ModelfileDirectiveNode[]): string | undefined {
+  const licenses = nodes.filter((node) => node.name === 'LICENSE');
   if (licenses.length === 0) return undefined;
-  return licenses.length === 1 ? licenses[0] : licenses;
+  if (licenses.length > 1) {
+    throw new ModelfileDeployCompileError(
+      'DEPLOY_LICENSE_MULTIPLE_UNVERIFIABLE',
+      'Multiple LICENSE directives are not supported by this deploy mode because post-create show verification exposes one license field.',
+    );
+  }
+  return unquotedText(licenses[0]!);
 }
 
 function directiveCounts(nodes: readonly ModelfileDirectiveNode[]): Readonly<Record<string, number>> {
@@ -202,14 +206,17 @@ export function compileModelfileForDeploy(raw: string): CompiledModelfileDeploy 
   const renderer = singleton(nodes, 'RENDERER');
   const parser = singleton(nodes, 'PARSER');
   const requires = singleton(nodes, 'REQUIRES');
+  const license = compileLicense(nodes);
+  const parameters = compileParameters(nodes);
+  const messages = compileMessages(nodes);
 
   const payload: CompiledOllamaCreatePayload = {
     from: baseModel,
     ...(template ? { template: unquotedText(template) } : {}),
     ...(system ? { system: unquotedText(system) } : {}),
-    ...(compileLicenses(nodes) !== undefined ? { license: compileLicenses(nodes) } : {}),
-    ...(compileParameters(nodes) ? { parameters: compileParameters(nodes) } : {}),
-    ...(compileMessages(nodes) ? { messages: compileMessages(nodes) } : {}),
+    ...(license !== undefined ? { license } : {}),
+    ...(parameters !== undefined ? { parameters } : {}),
+    ...(messages !== undefined ? { messages } : {}),
     ...(renderer ? { renderer: renderer.argument.trim() } : {}),
     ...(parser ? { parser: parser.argument.trim() } : {}),
     ...(requires ? { requires: requires.argument.trim() } : {}),
