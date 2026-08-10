@@ -16,7 +16,7 @@ test('GET /api/v1/health reports migrated SQLite state', async () => {
       status: 'ok',
       service: 'ollama-remote-control-api',
       version: '0.0.0',
-      database: { status: 'ok', schemaVersion: 8 },
+      database: { status: 'ok', schemaVersion: 9 },
     });
     assert.equal(fs.existsSync(databasePath), true);
   } finally {

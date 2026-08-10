@@ -8,6 +8,14 @@
       "types": "./dist/index.d.ts",
       "import": "./dist/index.js"
     },
+    "./modelfile-deploy": {
+      "types": "./dist/modelfile-deploy.d.ts",
+      "import": "./dist/modelfile-deploy.js"
+    },
+    "./modelfile-deploy-plans": {
+      "types": "./dist/modelfile-deploy-plans.d.ts",
+      "import": "./dist/modelfile-deploy-plans.js"
+    },
     "./modelfile-diff": {
       "types": "./dist/modelfile-diff.d.ts",
       "import": "./dist/modelfile-diff.js"
