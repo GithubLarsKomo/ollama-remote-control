@@ -31,6 +31,10 @@
     "./target-catalog": {
       "types": "./dist/target-catalog.d.ts",
       "import": "./dist/target-catalog.js"
+    },
+    "./update-history": {
+      "types": "./dist/update-history.d.ts",
+      "import": "./dist/update-history.js"
     }
   },
   "dependencies": {
