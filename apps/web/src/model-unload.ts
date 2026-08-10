@@ -18,6 +18,17 @@ export interface ModelUnloadResultView {
   readonly verified: true;
 }
 
+export interface ModelUnloadRequestBody {
+  readonly model: string;
+  readonly digest: string;
+  readonly confirmation: {
+    readonly action: 'unload';
+    readonly targetId: string;
+    readonly model: string;
+    readonly digest: string;
+  };
+}
+
 function isApiErrorPayload(value: unknown): value is { readonly error: { readonly code: string; readonly message: string } } {
   if (!value || typeof value !== 'object') return false;
   const error = (value as { error?: unknown }).error;
@@ -27,6 +38,23 @@ function isApiErrorPayload(value: unknown): value is { readonly error: { readonl
     && typeof (error as { code?: unknown }).code === 'string'
     && typeof (error as { message?: unknown }).message === 'string',
   );
+}
+
+export function modelUnloadRequestBody(input: {
+  readonly targetId: string;
+  readonly model: string;
+  readonly digest: string;
+}): ModelUnloadRequestBody {
+  return {
+    model: input.model,
+    digest: input.digest,
+    confirmation: {
+      action: 'unload',
+      targetId: input.targetId,
+      model: input.model,
+      digest: input.digest,
+    },
+  };
 }
 
 export async function unloadLoadedModel(input: {
@@ -44,16 +72,7 @@ export async function unloadLoadedModel(input: {
       'content-type': 'application/json',
       'x-csrf-token': csrf,
     },
-    body: JSON.stringify({
-      model: input.model,
-      digest: input.digest,
-      confirmation: {
-        action: 'unload',
-        targetId: input.targetId,
-        model: input.model,
-        digest: input.digest,
-      },
-    }),
+    body: JSON.stringify(modelUnloadRequestBody(input)),
   });
   if (response.ok) return (await response.json() as { readonly unload: ModelUnloadResultView }).unload;
   let payload: unknown = null;
