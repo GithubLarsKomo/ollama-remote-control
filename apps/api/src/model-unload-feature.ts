@@ -76,19 +76,25 @@ export function registerModelUnloadFeature(
     now,
     options.sessionTtlMs ?? DEFAULT_SESSION_TTL_MS,
   );
+  const jobs = new JobService(new SqliteJobRepository(database), now);
   const unload = new ModelUnloadService(
     new SqliteHostOnboardingRepository(database),
     new SqliteSshCredentialRepository(database),
     new SqliteOllamaTargetRepository(database),
     loadConfiguredMasterKey(options.environment ?? process.env),
-    new JobService(new SqliteJobRepository(database), now),
+    jobs,
     new AuditService(new SqliteAuditRepository(database), now),
   );
 
+  function requireAuthenticated(request: FastifyRequest) {
+    const session = auth.getSession(parseCookies(request.headers.cookie)[SESSION_COOKIE]);
+    if (!session) throw new AuthError('UNAUTHENTICATED', 401, 'Authentication is required.');
+    return session;
+  }
+
   function requireAuthenticatedMutation(request: FastifyRequest) {
     const cookies = parseCookies(request.headers.cookie);
-    const session = auth.getSession(cookies[SESSION_COOKIE]);
-    if (!session) throw new AuthError('UNAUTHENTICATED', 401, 'Authentication is required.');
+    const session = requireAuthenticated(request);
     const headerToken = csrfHeader(request.headers['x-csrf-token']);
     if (!headerToken || cookies[CSRF_COOKIE] !== headerToken) {
       throw new AuthError('CSRF_INVALID', 403, 'CSRF token is invalid.');
@@ -96,6 +102,23 @@ export function registerModelUnloadFeature(
     auth.assertCsrf(session, headerToken);
     return session;
   }
+
+  app.get<{ Params: TargetParams }>(
+    '/api/v1/targets/:targetId/mutation/active',
+    async (request, reply) => {
+      try {
+        requireAuthenticated(request);
+        const active = jobs.jobsNeedingReconciliation().find((job) => (
+          job.targetId === request.params.targetId && job.mutating
+        ));
+        return reply.send({
+          mutation: active ? { kind: active.kind, state: active.state } : null,
+        });
+      } catch (error) {
+        return sendFeatureError(reply, error);
+      }
+    },
+  );
 
   app.post<{ Params: TargetParams; Body: ModelUnloadBody }>(
     '/api/v1/targets/:targetId/models/unload',
