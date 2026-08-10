@@ -64,6 +64,7 @@ interface DeployParams {
   readonly modelfileId: string;
   readonly revisionId: string;
 }
+interface TargetParams { readonly targetId: string; }
 interface ConfirmDeployBody {
   readonly planId?: unknown;
   readonly confirmationToken?: unknown;
@@ -212,6 +213,20 @@ export function registerModelCreateFeature(
       }
     },
   );
+
+  app.get<{ Params: TargetParams }>('/api/v1/targets/:targetId/model-create/active', async (request, reply) => {
+    try {
+      const session = requireAuthenticated(request);
+      const active = jobService.jobsNeedingReconciliation().find((job) => (
+        job.kind === 'model-create'
+        && job.targetId === request.params.targetId
+        && job.actorUserId === session.userId
+      ));
+      return reply.send({ job: active ? creates.get(active.id, session.userId) : null });
+    } catch (error) {
+      return sendFeatureError(reply, error);
+    }
+  });
 
   app.get<{ Params: CreateJobParams }>('/api/v1/model-create-jobs/:jobId', async (request, reply) => {
     try {
