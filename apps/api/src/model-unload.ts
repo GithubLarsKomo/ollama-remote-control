@@ -131,18 +131,22 @@ function publicJob(job: StoredJob): PublicModelUnloadJob {
   };
 }
 
+function loadedModelNameMatches(
+  running: readonly RunningOllamaModelView[],
+  canonicalModel: string,
+): readonly RunningOllamaModelView[] {
+  return running.filter((entry) => (
+    canonicalOllamaModelName(entry.name) === canonicalModel
+    || canonicalOllamaModelName(entry.model) === canonicalModel
+  ));
+}
+
 function exactLoadedMatch(
   running: readonly RunningOllamaModelView[],
   canonicalModel: string,
   digest: string,
 ): readonly RunningOllamaModelView[] {
-  return running.filter((entry) => (
-    entry.digest === digest
-    && (
-      canonicalOllamaModelName(entry.name) === canonicalModel
-      || canonicalOllamaModelName(entry.model) === canonicalModel
-    )
-  ));
+  return loadedModelNameMatches(running, canonicalModel).filter((entry) => entry.digest === digest);
 }
 
 function mapTransportError(error: unknown): ModelUnloadError {
@@ -296,8 +300,14 @@ export class ModelUnloadService {
 
     const preflightTarget = await this.resolveRoute(targetId);
     const preflightRunning = await this.runningModels(preflightTarget);
-    const matches = exactLoadedMatch(preflightRunning, canonicalModel, requestedDigest);
-    if (matches.length === 0) throw new ModelUnloadError('MODEL_NOT_LOADED', 409, 'The confirmed model/digest is no longer loaded.');
+    const sameName = loadedModelNameMatches(preflightRunning, canonicalModel);
+    const matches = sameName.filter((entry) => entry.digest === requestedDigest);
+    if (matches.length === 0) {
+      if (sameName.length > 0) {
+        throw new ModelUnloadError('MODEL_UNLOAD_STALE', 409, 'The confirmed model name is still loaded, but its digest changed. Refresh loaded models before retrying.');
+      }
+      throw new ModelUnloadError('MODEL_NOT_LOADED', 409, 'The confirmed model is no longer loaded.');
+    }
     if (matches.length !== 1) throw new ModelUnloadError('MODEL_MATCH_AMBIGUOUS', 409, 'Loaded model identity is ambiguous.');
     const loaded = matches[0];
     const serverModel = canonicalOllamaModelName(loaded.model);
