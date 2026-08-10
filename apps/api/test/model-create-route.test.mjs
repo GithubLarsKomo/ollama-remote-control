@@ -197,6 +197,7 @@ test('confirmed deploy ignores forged browser semantics, creates through pinned 
       createBody = await readJsonRequest(request);
       response.setHeader('content-type', 'application/x-ndjson');
       response.write(`${JSON.stringify({ status: 'creating model layer' })}\n`);
+      await delay(200);
       outputInstalled = true;
       response.end(`${JSON.stringify({ status: 'success' })}\n`);
       return;
@@ -263,6 +264,15 @@ test('confirmed deploy ignores forged browser semantics, creates through pinned 
     });
     assert.equal(started.statusCode, 202);
     const jobId = started.json().job.id;
+
+    const active = await app.inject({
+      method: 'GET', url: `/api/v1/targets/${targetId}/model-create/active`,
+      headers: { cookie: cookieHeader(cookies) },
+    });
+    assert.equal(active.statusCode, 200);
+    assert.equal(active.json().job.id, jobId);
+    assert.equal(['queued', 'running', 'cancelling'].includes(active.json().job.state), true);
+
     const terminal = await waitForCreateJob(app, cookies, jobId, (job) => ['succeeded', 'failed'].includes(job.state));
     assert.equal(terminal.state, 'succeeded');
     assert.equal(terminal.errorClass, null);
@@ -283,6 +293,13 @@ test('confirmed deploy ignores forged browser semantics, creates through pinned 
     });
     assert.equal(JSON.stringify(createBody).includes('FORGED SYSTEM'), false);
     assert.equal(JSON.stringify(createBody).includes('forged:latest'), false);
+
+    const noLongerActive = await app.inject({
+      method: 'GET', url: `/api/v1/targets/${targetId}/model-create/active`,
+      headers: { cookie: cookieHeader(cookies) },
+    });
+    assert.equal(noLongerActive.statusCode, 200);
+    assert.equal(noLongerActive.json().job, null);
 
     const replay = await app.inject({
       method: 'POST', url: `${route}/deploy`, headers: mutationHeaders(cookies),
