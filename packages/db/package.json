@@ -28,6 +28,10 @@
       "types": "./dist/modelfiles.d.ts",
       "import": "./dist/modelfiles.js"
     },
+    "./provenance": {
+      "types": "./dist/provenance.d.ts",
+      "import": "./dist/provenance.js"
+    },
     "./target-binding": {
       "types": "./dist/target-binding.d.ts",
       "import": "./dist/target-binding.js"

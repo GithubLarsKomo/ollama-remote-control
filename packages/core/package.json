@@ -39,6 +39,10 @@
     "./modelfiles": {
       "types": "./dist/modelfiles.d.ts",
       "import": "./dist/modelfiles.js"
+    },
+    "./provenance": {
+      "types": "./dist/provenance.d.ts",
+      "import": "./dist/provenance.js"
     }
   }
 }
