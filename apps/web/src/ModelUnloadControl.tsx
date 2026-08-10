@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { ApiError } from './api.js';
 import { type RunningModelView } from './model-inventory.js';
 import { unloadLoadedModel } from './model-unload.js';
+import './model-unload.css';
 
 interface ModelUnloadControlProps {
   readonly targetId: string;
