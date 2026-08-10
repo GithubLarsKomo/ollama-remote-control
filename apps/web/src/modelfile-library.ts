@@ -150,8 +150,7 @@ export function modelfileExportFilename(displayName: string, revisionNumber: num
   const normalized = displayName.normalize('NFKC').trim();
   const stem = normalized
     .replace(/[^\p{L}\p{N}._-]+/gu, '-')
-    .replace(/^-+|-+$/gu, '')
-    .replace(/^\.+|\.+$/gu, '')
+    .replace(/^[.-]+|[.-]+$/gu, '')
     .slice(0, 80) || 'modelfile';
   const revision = Number.isSafeInteger(revisionNumber) && revisionNumber > 0 ? revisionNumber : 1;
   return `${stem}-r${revision}.Modelfile`;
