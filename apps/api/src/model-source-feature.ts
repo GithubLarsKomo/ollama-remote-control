@@ -29,6 +29,10 @@ import {
   OllamaModelDetailError,
   OllamaModelDetailService,
 } from './ollama-model-details.js';
+import {
+  buildModelProvenanceGraph,
+  SqliteModelProvenanceEvidenceStore,
+} from './model-provenance-graph.js';
 
 interface TargetParams { readonly targetId: string; }
 interface ModelQuery { readonly model?: unknown; }
@@ -69,6 +73,7 @@ export function registerModelSourceFeature(
     new SqliteOllamaTargetRepository(database),
     loadConfiguredMasterKey(options.environment ?? process.env),
   );
+  const provenance = new SqliteModelProvenanceEvidenceStore(database);
 
   function requireAuthenticated(request: FastifyRequest) {
     const session = auth.getSession(parseCookies(request.headers.cookie)[SESSION_COOKIE]);
@@ -91,6 +96,11 @@ export function registerModelSourceFeature(
             from: from ? resolveModelSourceReference(from.reference) : null,
             adapters: detail.provenancePreview.adapters.map((adapter) => resolveModelSourceReference(adapter.reference)),
           },
+          graph: buildModelProvenanceGraph(provenance, {
+            targetId: detail.targetId,
+            model: detail.identity.model,
+            digest: detail.identity.digest,
+          }),
         });
       } catch (error) {
         return sendFeatureError(reply, error);

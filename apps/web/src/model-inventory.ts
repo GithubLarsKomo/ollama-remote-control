@@ -49,6 +49,38 @@ export interface ModelSourceResolutionView {
   readonly url: string | null;
 }
 
+export type ModelProvenanceNodeView =
+  | {
+      readonly id: string;
+      readonly kind: 'installed-model';
+      readonly model: string;
+      readonly digest: string;
+    }
+  | {
+      readonly id: string;
+      readonly kind: 'modelfile-revision';
+      readonly modelfileId: string;
+      readonly revisionId: string;
+      readonly revisionNumber: number;
+      readonly revisionSha256: string;
+      readonly displayName: string;
+    }
+  | {
+      readonly id: string;
+      readonly kind: 'model-reference';
+      readonly model: string;
+    };
+
+export interface ModelProvenanceEdgeView {
+  readonly id: string;
+  readonly from: string;
+  readonly to: string;
+  readonly relation: 'captured-as-revision' | 'created-from-revision' | 'base-model';
+  readonly evidence: 'persisted-import' | 'verified-create';
+  readonly observedAt: string;
+  readonly jobId: string | null;
+}
+
 export interface ModelSourceView {
   readonly targetId: string;
   readonly model: string;
@@ -56,6 +88,11 @@ export interface ModelSourceView {
     readonly model: ModelSourceResolutionView;
     readonly from: ModelSourceResolutionView | null;
     readonly adapters: readonly ModelSourceResolutionView[];
+  };
+  readonly graph: {
+    readonly currentNodeId: string;
+    readonly nodes: readonly ModelProvenanceNodeView[];
+    readonly edges: readonly ModelProvenanceEdgeView[];
   };
 }
 
