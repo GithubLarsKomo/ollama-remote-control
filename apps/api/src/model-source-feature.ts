@@ -13,6 +13,10 @@ import {
   SqliteSshCredentialRepository,
 } from '@orc/db';
 import {
+  backfillVerifiedProvenanceEvidence,
+  readPersistedProvenanceGraph,
+} from '@orc/db/provenance-backfill';
+import {
   loadConfiguredMasterKey,
   type MasterKeyEnvironment,
 } from '@orc/security';
@@ -61,6 +65,7 @@ export function registerModelSourceFeature(
 
   const database = openDatabase(options.databasePath);
   applyMigrations(database);
+  backfillVerifiedProvenanceEvidence(database);
   const now = options.now ?? (() => new Date());
   const auth = new AuthService(
     new SqliteAuthRepository(database),
@@ -87,6 +92,12 @@ export function registerModelSourceFeature(
       try {
         requireAuthenticated(request);
         const detail = await details.read(request.params.targetId, request.query?.model);
+        backfillVerifiedProvenanceEvidence(database);
+        const graphInput = {
+          targetId: detail.targetId,
+          model: detail.identity.model,
+          digest: detail.identity.digest,
+        };
         const from = detail.provenancePreview.from;
         return reply.send({
           targetId: detail.targetId,
@@ -96,11 +107,8 @@ export function registerModelSourceFeature(
             from: from ? resolveModelSourceReference(from.reference) : null,
             adapters: detail.provenancePreview.adapters.map((adapter) => resolveModelSourceReference(adapter.reference)),
           },
-          graph: buildModelProvenanceGraph(provenance, {
-            targetId: detail.targetId,
-            model: detail.identity.model,
-            digest: detail.identity.digest,
-          }),
+          graph: buildModelProvenanceGraph(provenance, graphInput),
+          persistedGraph: readPersistedProvenanceGraph(database, graphInput),
         });
       } catch (error) {
         return sendFeatureError(reply, error);

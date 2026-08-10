@@ -32,6 +32,10 @@
       "types": "./dist/provenance.d.ts",
       "import": "./dist/provenance.js"
     },
+    "./provenance-backfill": {
+      "types": "./dist/provenance-backfill.d.ts",
+      "import": "./dist/provenance-backfill.js"
+    },
     "./target-binding": {
       "types": "./dist/target-binding.d.ts",
       "import": "./dist/target-binding.js"
