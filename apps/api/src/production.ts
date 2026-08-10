@@ -1,6 +1,7 @@
 import { pathToFileURL } from 'node:url';
 import { registerAuditFeature } from './audit-feature.js';
 import { registerModelCreateFeature } from './model-create-feature.js';
+import { registerModelSmokeFeature } from './model-smoke-feature.js';
 import { registerModelSourceFeature } from './model-source-feature.js';
 import { registerModelUnloadFeature } from './model-unload-feature.js';
 import { registerModelfilePortabilityFeature } from './modelfile-portability-feature.js';
@@ -17,6 +18,10 @@ export function buildProductionServer(environment: NodeJS.ProcessEnv = process.e
     databasePath,
   });
   registerModelCreateFeature(app, {
+    databasePath,
+    environment,
+  });
+  registerModelSmokeFeature(app, {
     databasePath,
     environment,
   });
