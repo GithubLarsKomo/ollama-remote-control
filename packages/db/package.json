@@ -8,6 +8,10 @@
       "types": "./dist/index.d.ts",
       "import": "./dist/index.js"
     },
+    "./audit-query": {
+      "types": "./dist/audit-query.d.ts",
+      "import": "./dist/audit-query.js"
+    },
     "./host-catalog": {
       "types": "./dist/host-catalog.d.ts",
       "import": "./dist/host-catalog.js"

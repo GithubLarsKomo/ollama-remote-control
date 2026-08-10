@@ -1,4 +1,5 @@
 import { pathToFileURL } from 'node:url';
+import { registerAuditFeature } from './audit-feature.js';
 import { registerModelCreateFeature } from './model-create-feature.js';
 import { registerModelSourceFeature } from './model-source-feature.js';
 import { registerModelUnloadFeature } from './model-unload-feature.js';
@@ -11,6 +12,9 @@ export function buildProductionServer(environment: NodeJS.ProcessEnv = process.e
   const app = buildServer({
     databasePath,
     environment,
+  });
+  registerAuditFeature(app, {
+    databasePath,
   });
   registerModelCreateFeature(app, {
     databasePath,

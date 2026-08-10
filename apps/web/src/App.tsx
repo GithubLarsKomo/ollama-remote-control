@@ -12,6 +12,7 @@ import {
   type TargetCatalogEntry,
   type TargetStatusResult,
 } from './api.js';
+import AuditPanel from './AuditPanel.js';
 import {
   displayValue,
   formatBytes,
@@ -365,6 +366,8 @@ function Dashboard({ session, onSignedOut }: { readonly session: SessionView; re
         {!catalogBusy && targets.length === 0 ? (
           <OnboardingPanel onCompleted={onboardingCompleted} onSignedOut={onSignedOut} />
         ) : null}
+
+        <AuditPanel onSignedOut={onSignedOut} targets={targets} />
 
         {selectedTarget ? (
           <section className="target-summary" aria-label="Selected target">
