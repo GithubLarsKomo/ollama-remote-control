@@ -1,0 +1,68 @@
+.model-create-panel {
+  margin-top: 1.5rem;
+  border-top: 1px solid var(--border-subtle, #d7dce2);
+  padding-top: 1.25rem;
+}
+
+.model-create-form-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 0.9rem;
+  align-items: end;
+}
+
+.model-create-form-grid label {
+  display: grid;
+  gap: 0.35rem;
+  font-weight: 600;
+}
+
+.model-create-form-grid input,
+.model-create-form-grid select,
+.model-create-plan select {
+  width: 100%;
+}
+
+.model-create-plan,
+.model-create-job {
+  margin-top: 1rem;
+  border: 1px solid var(--border-subtle, #d7dce2);
+  border-radius: 0.75rem;
+  padding: 1rem;
+  background: var(--surface-muted, #f7f8fa);
+}
+
+.model-create-plan-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
+  gap: 0.75rem 1rem;
+  margin: 0.75rem 0 1rem;
+}
+
+.model-create-plan-grid div {
+  min-width: 0;
+}
+
+.model-create-plan-grid dt {
+  color: var(--text-muted, #5f6670);
+  font-size: 0.82rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+
+.model-create-plan-grid dd {
+  margin: 0.2rem 0 0;
+  overflow-wrap: anywhere;
+}
+
+.model-create-progress {
+  margin: 0.75rem 0;
+  padding-left: 1.4rem;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 0.88rem;
+}
+
+.model-create-progress li + li {
+  margin-top: 0.2rem;
+}
