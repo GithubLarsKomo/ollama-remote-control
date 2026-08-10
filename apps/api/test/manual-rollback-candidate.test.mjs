@@ -170,8 +170,8 @@ test('manual rollback candidate becomes unavailable when target binding moved af
 
 test('manual rollback candidate rejects tampered intent/update/snapshot authority instead of falling back', () => {
   const cases = [
-    ['update candidate digest', (f) => f.database.prepare('UPDATE jobs SET result_json = json_set(result_json, ?) WHERE id = ?').run('$.candidateDigest', `sha256:${'9'.repeat(64)}`, f.updateJob.id)],
-    ['intent snapshot id', (f) => f.database.prepare('UPDATE jobs SET result_json = json_set(result_json, ?) WHERE id = ?').run('$.snapshotId', 'other-snapshot', f.intentJob.id)],
+    ['update candidate digest', (f) => f.database.prepare("UPDATE jobs SET result_json = json_set(result_json, '$.candidateDigest', ?) WHERE id = ?").run(`sha256:${'9'.repeat(64)}`, f.updateJob.id)],
+    ['intent snapshot id', (f) => f.database.prepare("UPDATE jobs SET result_json = json_set(result_json, '$.snapshotId', ?) WHERE id = ?").run('other-snapshot', f.intentJob.id)],
   ];
   for (const [name, tamper] of cases) {
     const f = fixture();
