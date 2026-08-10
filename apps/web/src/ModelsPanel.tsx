@@ -13,6 +13,7 @@ import LocalModelfilesPanel from './LocalModelfilesPanel.js';
 import ModelCreatePanel from './ModelCreatePanel.js';
 import ModelDetailsPanel from './ModelDetailsPanel.js';
 import ModelPullPanel from './ModelPullPanel.js';
+import ModelUnloadControl from './ModelUnloadControl.js';
 import {
   fetchModelInventory,
   runningModelDigests,
@@ -42,7 +43,21 @@ function contextLabel(value: number): string {
   return value > 0 ? value.toLocaleString('en-US') : 'Unavailable';
 }
 
-function RunningModelCard({ model }: { readonly model: RunningModelView }) {
+function RunningModelCard({
+  model,
+  targetId,
+  targetName,
+  disabled,
+  onSignedOut,
+  onUnloaded,
+}: {
+  readonly model: RunningModelView;
+  readonly targetId: string;
+  readonly targetName: string;
+  readonly disabled: boolean;
+  readonly onSignedOut: () => void;
+  readonly onUnloaded: () => Promise<void> | void;
+}) {
   return (
     <article className="running-model-card">
       <div className="model-row-heading">
@@ -55,6 +70,14 @@ function RunningModelCard({ model }: { readonly model: RunningModelView }) {
         <div><dt>Expires</dt><dd>{model.expiresAt ? formatTimestamp(model.expiresAt) : 'Unavailable'}</dd></div>
         <div><dt>Quantization</dt><dd>{display(model.details.quantizationLevel)}</dd></div>
       </dl>
+      <ModelUnloadControl
+        disabled={disabled}
+        model={model}
+        onSignedOut={onSignedOut}
+        onSucceeded={onUnloaded}
+        targetId={targetId}
+        targetName={targetName}
+      />
     </article>
   );
 }
@@ -112,7 +135,7 @@ export default function ModelsPanel({ status, disabled, onSignedOut }: ModelsPan
           <p className="eyebrow">Ollama API over pinned SSH</p>
           <h2 id="models-title">Models</h2>
           <p className="muted">
-            Inventory, details and local Modelfile revisions stay server-authoritative. Model pulls run as persistent jobs through a fixed Ollama API operation. Port 11434 remains private.
+            Inventory, details and local Modelfile revisions stay server-authoritative. Model pulls, creates and unloads use fixed Ollama API operations with remote verification. Port 11434 remains private.
           </p>
         </div>
         <button
@@ -221,14 +244,24 @@ export default function ModelsPanel({ status, disabled, onSignedOut }: ModelsPan
           <div className="models-section-heading models-running-heading">
             <div>
               <h3>Loaded models</h3>
-              <p className="muted">Equivalent to the read-only inventory behind <code>ollama ps</code>.</p>
+              <p className="muted">Equivalent to the read-only inventory behind <code>ollama ps</code>. Unload uses a fixed <code>keep_alive: 0</code> operation and succeeds only after a fresh loaded-model check.</p>
             </div>
           </div>
           {inventory.running.length === 0 ? (
             <p className="models-notice">No models are currently loaded in Ollama memory.</p>
           ) : (
             <div className="running-model-grid">
-              {inventory.running.map((model) => <RunningModelCard key={`${model.digest}:${model.model}`} model={model} />)}
+              {inventory.running.map((model) => (
+                <RunningModelCard
+                  disabled={disabled || busy}
+                  key={`${model.digest}:${model.model}`}
+                  model={model}
+                  onSignedOut={onSignedOut}
+                  onUnloaded={load}
+                  targetId={status.target.id}
+                  targetName={status.target.displayName}
+                />
+              ))}
             </div>
           )}
 
