@@ -19,7 +19,7 @@ import {
 } from './ollama-health.js';
 import type {
   InstalledOllamaModelView,
-  ModelInventoryView,
+  OllamaModelInventoryResult,
   RunningOllamaModelView,
   OllamaModelInventoryService,
 } from './ollama-models.js';
@@ -135,7 +135,7 @@ function publicJob(job: StoredJob): PublicModelSmokeJob {
 }
 
 function installedNameMatches(
-  inventory: ModelInventoryView,
+  inventory: OllamaModelInventoryResult,
   canonicalModel: string,
 ): readonly InstalledOllamaModelView[] {
   return inventory.installed.filter((entry) => (
@@ -145,7 +145,7 @@ function installedNameMatches(
 }
 
 function runningNameMatches(
-  inventory: ModelInventoryView,
+  inventory: OllamaModelInventoryResult,
   canonicalModel: string,
 ): readonly RunningOllamaModelView[] {
   return inventory.running.filter((entry) => (
