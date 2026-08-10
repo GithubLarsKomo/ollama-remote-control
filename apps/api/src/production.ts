@@ -1,10 +1,16 @@
 import { pathToFileURL } from 'node:url';
+import { registerModelCreateFeature } from './model-create-feature.js';
 import { buildServer } from './server.js';
 import { registerWebAssets } from './web-assets.js';
 
 export function buildProductionServer(environment: NodeJS.ProcessEnv = process.env) {
+  const databasePath = environment.ORC_DATABASE_PATH ?? '/data/ollama-remote-control.sqlite';
   const app = buildServer({
-    databasePath: environment.ORC_DATABASE_PATH ?? '/data/ollama-remote-control.sqlite',
+    databasePath,
+    environment,
+  });
+  registerModelCreateFeature(app, {
+    databasePath,
     environment,
   });
   registerWebAssets(app, environment.ORC_WEB_DIST_PATH ?? null);
