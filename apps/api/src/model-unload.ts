@@ -217,10 +217,8 @@ export class ModelUnloadService {
     return local;
   }
 
-  private async resolveRoute(targetId: string, expectedContainerId?: string): Promise<ResolvedUnloadTarget> {
-    const local = expectedContainerId
-      ? this.assertExpectedBinding(targetId, expectedContainerId)
-      : this.resolveLocal(targetId);
+  private async resolveRoute(targetId: string, expectedContainerId: string): Promise<ResolvedUnloadTarget> {
+    const local = this.assertExpectedBinding(targetId, expectedContainerId);
     let inspectResult;
     try {
       inspectResult = await execPrivateKey(
@@ -298,21 +296,13 @@ export class ModelUnloadService {
     const requestedDigest = normalizedDigest(digestValue);
     this.assertConfirmation(targetId, canonicalModel, requestedDigest, confirmation);
 
-    const preflightTarget = await this.resolveRoute(targetId);
-    const preflightRunning = await this.runningModels(preflightTarget);
-    const sameName = loadedModelNameMatches(preflightRunning, canonicalModel);
-    const matches = sameName.filter((entry) => entry.digest === requestedDigest);
-    if (matches.length === 0) {
-      if (sameName.length > 0) {
-        throw new ModelUnloadError('MODEL_UNLOAD_STALE', 409, 'The confirmed model name is still loaded, but its digest changed. Refresh loaded models before retrying.');
-      }
-      throw new ModelUnloadError('MODEL_NOT_LOADED', 409, 'The confirmed model is no longer loaded.');
-    }
-    if (matches.length !== 1) throw new ModelUnloadError('MODEL_MATCH_AMBIGUOUS', 409, 'Loaded model identity is ambiguous.');
-    const loaded = matches[0];
-    const serverModel = canonicalOllamaModelName(loaded.model);
-    const expectedContainerId = preflightTarget.selectedContainerId;
-    this.assertExpectedBinding(targetId, expectedContainerId);
+    const local = this.resolveLocal(targetId);
+    const expectedContainerId = local.selectedContainerId;
+    const safe = {
+      model: canonicalModel,
+      digest: requestedDigest,
+      selectedContainerId: expectedContainerId,
+    };
 
     let job: StoredJob;
     try {
@@ -321,15 +311,10 @@ export class ModelUnloadService {
       throw mapTransportError(error);
     }
 
-    const safe = {
-      model: serverModel,
-      digest: loaded.digest,
-      selectedContainerId: expectedContainerId,
-    };
     try {
       this.audit.record({
         actorUserId,
-        hostId: preflightTarget.hostId,
+        hostId: local.hostId,
         targetId,
         action: 'model.unload.requested',
         parameters: safe,
@@ -337,6 +322,20 @@ export class ModelUnloadService {
         jobId: job.id,
       });
       this.jobs.transition(job.id, 'running', { result: safe });
+
+      const preflightTarget = await this.resolveRoute(targetId, expectedContainerId);
+      const preflightRunning = await this.runningModels(preflightTarget);
+      const sameName = loadedModelNameMatches(preflightRunning, canonicalModel);
+      const matches = sameName.filter((entry) => entry.digest === requestedDigest);
+      if (matches.length === 0) {
+        if (sameName.length > 0) {
+          throw new ModelUnloadError('MODEL_UNLOAD_STALE', 409, 'The confirmed model name is still loaded, but its digest changed. Refresh loaded models before retrying.');
+        }
+        throw new ModelUnloadError('MODEL_NOT_LOADED', 409, 'The confirmed model is no longer loaded.');
+      }
+      if (matches.length !== 1) throw new ModelUnloadError('MODEL_MATCH_AMBIGUOUS', 409, 'Loaded model identity is ambiguous.');
+      const loaded = matches[0];
+      const serverModel = canonicalOllamaModelName(loaded.model);
 
       const executionTarget = await this.resolveRoute(targetId, expectedContainerId);
       await unloadOllamaModelViaPinnedSsh(
@@ -352,17 +351,22 @@ export class ModelUnloadService {
         throw new ModelUnloadError('MODEL_UNLOAD_VERIFICATION_FAILED', 502, 'Ollama still reports the confirmed model/digest as loaded.');
       }
 
+      const verified = {
+        model: serverModel,
+        digest: loaded.digest,
+        selectedContainerId: expectedContainerId,
+      };
       this.audit.record({
         actorUserId,
         hostId: verificationTarget.hostId,
         targetId,
         action: 'model.unload.verified',
-        parameters: safe,
+        parameters: verified,
         result: 'succeeded',
         jobId: job.id,
       });
       const terminal = this.jobs.transition(job.id, 'succeeded', {
-        result: { ...safe, verified: true },
+        result: { ...verified, verified: true },
         exitCode: 0,
       });
       return { job: publicJob(terminal), model: serverModel, digest: loaded.digest, verified: true };
@@ -371,7 +375,7 @@ export class ModelUnloadService {
       try {
         this.audit.record({
           actorUserId,
-          hostId: preflightTarget.hostId,
+          hostId: local.hostId,
           targetId,
           action: 'model.unload.failed',
           parameters: safe,
