@@ -53,6 +53,7 @@ export interface ModelSourceView {
   readonly targetId: string;
   readonly model: string;
   readonly sources: {
+    readonly model: ModelSourceResolutionView;
     readonly from: ModelSourceResolutionView | null;
     readonly adapters: readonly ModelSourceResolutionView[];
   };
