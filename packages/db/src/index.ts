@@ -55,6 +55,7 @@ const migrations: readonly Migration[] = [
   { version: 8, name: 'modelfile-library', source: new URL('../migrations/0008_modelfile_library.sql', import.meta.url) },
   { version: 9, name: 'modelfile-deploy-plans', source: new URL('../migrations/0009_modelfile_deploy_plans.sql', import.meta.url) },
   { version: 10, name: 'modelfile-deployments', source: new URL('../migrations/0010_modelfile_deployments.sql', import.meta.url) },
+  { version: 11, name: 'provenance', source: new URL('../migrations/0011_provenance.sql', import.meta.url) },
 ];
 
 export function openDatabase(filename: string): DatabaseConnection {
