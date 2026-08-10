@@ -213,6 +213,9 @@ export default function ModelDetailsPanel({
                 <h4>Source links</h4>
                 {sourceBusy ? <p className="muted">Resolving explicit model references…</p> : null}
                 {sourceError ? <p className="muted">Source resolution unavailable: {sourceError}</p> : null}
+                {sources ? (
+                  <p><strong>Installed model:</strong> <SourceReference source={sources.sources.model} /></p>
+                ) : null}
                 {sources?.sources.from ? (
                   <p><strong>FROM:</strong> <SourceReference source={sources.sources.from} /></p>
                 ) : !sourceBusy ? <p className="muted">No explicit FROM source reference available.</p> : null}
