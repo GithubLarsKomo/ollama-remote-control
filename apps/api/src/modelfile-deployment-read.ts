@@ -41,7 +41,7 @@ export class ModelfileDeploymentReadService {
   ) {}
 
   forModelfile(modelfileId: string): readonly ModelfileDeploymentView[] {
-    const artifact = this.modelfiles.findArtifactById(modelfileId);
+    const artifact = this.modelfiles.findById(modelfileId);
     if (!artifact) {
       throw new ModelfileDeploymentReadError('MODELFILE_NOT_FOUND', 404, 'Modelfile was not found.');
     }
@@ -49,7 +49,7 @@ export class ModelfileDeploymentReadService {
   }
 
   forRevision(modelfileId: string, revisionId: string): readonly ModelfileDeploymentView[] {
-    const artifact = this.modelfiles.findArtifactById(modelfileId);
+    const artifact = this.modelfiles.findById(modelfileId);
     if (!artifact) {
       throw new ModelfileDeploymentReadError('MODELFILE_NOT_FOUND', 404, 'Modelfile was not found.');
     }
@@ -68,7 +68,7 @@ export class ModelfileDeploymentReadService {
     const model = requiredModel(modelInput);
     const deployment = this.deployments.latestForTargetModel(target.id, model);
     if (!deployment) return null;
-    const artifact = this.modelfiles.findArtifactById(deployment.modelfileId);
+    const artifact = this.modelfiles.findById(deployment.modelfileId);
     if (!artifact) {
       throw new ModelfileDeploymentReadError(
         'DEPLOYMENT_EVIDENCE_INVALID',
