@@ -11,6 +11,11 @@ export interface PublicModelUnloadJob {
   readonly errorClass: string | null;
 }
 
+export interface ActiveTargetMutationView {
+  readonly kind: string;
+  readonly state: 'queued' | 'running' | 'cancelling';
+}
+
 export interface ModelUnloadResultView {
   readonly job: PublicModelUnloadJob;
   readonly model: string;
@@ -40,6 +45,13 @@ function isApiErrorPayload(value: unknown): value is { readonly error: { readonl
   );
 }
 
+async function safeError(response: Response, fallbackMessage: string): Promise<never> {
+  let payload: unknown = null;
+  try { payload = await response.json(); } catch { /* generic error below */ }
+  if (isApiErrorPayload(payload)) throw new ApiError(response.status, payload.error.code, payload.error.message);
+  throw new ApiError(response.status, 'HTTP_ERROR', fallbackMessage);
+}
+
 export function modelUnloadRequestBody(input: {
   readonly targetId: string;
   readonly model: string;
@@ -55,6 +67,16 @@ export function modelUnloadRequestBody(input: {
       digest: input.digest,
     },
   };
+}
+
+export async function readActiveTargetMutation(targetId: string): Promise<ActiveTargetMutationView | null> {
+  const response = await fetch(`/api/v1/targets/${encodeURIComponent(targetId)}/mutation/active`, {
+    method: 'GET',
+    credentials: 'include',
+    headers: { accept: 'application/json' },
+  });
+  if (response.ok) return (await response.json() as { readonly mutation: ActiveTargetMutationView | null }).mutation;
+  return safeError(response, `Active target mutation lookup failed with HTTP ${response.status}.`);
 }
 
 export async function unloadLoadedModel(input: {
@@ -75,8 +97,5 @@ export async function unloadLoadedModel(input: {
     body: JSON.stringify(modelUnloadRequestBody(input)),
   });
   if (response.ok) return (await response.json() as { readonly unload: ModelUnloadResultView }).unload;
-  let payload: unknown = null;
-  try { payload = await response.json(); } catch { /* generic error below */ }
-  if (isApiErrorPayload(payload)) throw new ApiError(response.status, payload.error.code, payload.error.message);
-  throw new ApiError(response.status, 'HTTP_ERROR', `Model unload failed with HTTP ${response.status}.`);
+  return safeError(response, `Model unload failed with HTTP ${response.status}.`);
 }
