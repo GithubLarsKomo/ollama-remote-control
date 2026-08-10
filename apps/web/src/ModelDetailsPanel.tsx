@@ -5,6 +5,7 @@ import {
   fetchModelDetail,
   fetchModelSources,
   type ModelDetailView,
+  type ModelProvenanceNodeView,
   type ModelSourceResolutionView,
   type ModelSourceView,
   type ProvenanceReferencePreview,
@@ -71,6 +72,23 @@ function SourceReference({ source }: { readonly source: ModelSourceResolutionVie
   }
   if (source.state === 'local-artifact') return <span>{source.reference} · local artifact · no upstream link</span>;
   return <span>{source.reference} · unresolved source</span>;
+}
+
+function graphNodeLabel(node: ModelProvenanceNodeView | undefined): string {
+  if (!node) return 'Unknown node';
+  if (node.kind === 'installed-model') return `${node.model} · ${node.digest.slice(0, 12)}…`;
+  if (node.kind === 'model-reference') return node.model;
+  return `${node.displayName} · r${node.revisionNumber} · ${node.revisionSha256.slice(0, 12)}…`;
+}
+
+function relationLabel(relation: 'captured-as-revision' | 'created-from-revision' | 'base-model'): string {
+  if (relation === 'captured-as-revision') return 'captured as immutable revision';
+  if (relation === 'created-from-revision') return 'verified create from revision';
+  return 'verified base model';
+}
+
+function evidenceLabel(evidence: 'persisted-import' | 'verified-create'): string {
+  return evidence === 'persisted-import' ? 'persisted import' : 'verified create';
 }
 
 function TextBlock({ label, value }: { readonly label: string; readonly value: string | null }) {
@@ -152,6 +170,10 @@ export default function ModelDetailsPanel({
     () => detail?.provenancePreview.adapters.map((adapter) => provenanceLabel(adapter)) ?? [],
     [detail],
   );
+  const graphNodes = useMemo(
+    () => new Map(sources?.graph.nodes.map((node) => [node.id, node]) ?? []),
+    [sources],
+  );
 
   return (
     <section className="model-detail-panel" aria-labelledby="model-detail-title">
@@ -224,8 +246,27 @@ export default function ModelDetailsPanel({
                 ) : null}
               </section>
 
+              <section className="model-detail-sources" aria-label="Local provenance evidence graph">
+                <h4>Local provenance evidence</h4>
+                {sources?.graph.edges.length ? (
+                  <ul>
+                    {sources.graph.edges.map((edge) => (
+                      <li key={edge.id}>
+                        <strong>{graphNodeLabel(graphNodes.get(edge.from))}</strong>
+                        {' → '}{relationLabel(edge.relation)}{' → '}
+                        <strong>{graphNodeLabel(graphNodes.get(edge.to))}</strong>
+                        {' · '}{evidenceLabel(edge.evidence)}
+                        {' · '}{formatTimestamp(edge.observedAt)}
+                      </li>
+                    ))}
+                  </ul>
+                ) : !sourceBusy ? (
+                  <p className="muted">No digest-matched local import or verified-create evidence is recorded for this installed model.</p>
+                ) : null}
+              </section>
+
               <p className="model-provenance-note">
-                Source links are derived only from explicit server-observed references. Local blob or file references are not treated as verified upstream lineage and never receive an external link.
+                Source links are derived only from explicit server-observed references. Local provenance edges require matching target, canonical model identity and current digest. Local blob or file references are not treated as verified upstream lineage and never receive an external link.
               </p>
             </div>
           ) : null}
