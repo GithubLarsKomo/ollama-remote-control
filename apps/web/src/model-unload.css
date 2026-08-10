@@ -1,0 +1,38 @@
+.model-unload-button {
+  width: 100%;
+  margin-top: 0.85rem;
+}
+
+.model-unload-confirmation {
+  margin-top: 0.85rem;
+  border: 1px solid #8b5f37;
+  border-radius: 0.75rem;
+  background: #2a1d12;
+  padding: 0.8rem;
+}
+
+.model-unload-confirmation p {
+  margin: 0 0 0.55rem;
+  line-height: 1.45;
+}
+
+.model-unload-confirmation code {
+  color: #f0d1ad;
+}
+
+.model-unload-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.55rem;
+  margin-top: 0.7rem;
+}
+
+.model-unload-actions button {
+  width: auto;
+}
+
+@media (max-width: 720px) {
+  .model-unload-actions button {
+    width: 100%;
+  }
+}
