@@ -1,6 +1,7 @@
 import { pathToFileURL } from 'node:url';
 import { registerModelCreateFeature } from './model-create-feature.js';
 import { registerModelSourceFeature } from './model-source-feature.js';
+import { registerModelUnloadFeature } from './model-unload-feature.js';
 import { buildServer } from './server.js';
 import { registerWebAssets } from './web-assets.js';
 
@@ -15,6 +16,10 @@ export function buildProductionServer(environment: NodeJS.ProcessEnv = process.e
     environment,
   });
   registerModelSourceFeature(app, {
+    databasePath,
+    environment,
+  });
+  registerModelUnloadFeature(app, {
     databasePath,
     environment,
   });
