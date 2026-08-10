@@ -51,6 +51,17 @@ test('production server exposes SPA and API from the same Fastify instance witho
     assert.equal(response.statusCode, 401);
     assert.equal(response.json().error.code, 'UNAUTHENTICATED');
 
+    response = await app.inject({ method: 'GET', url: '/api/v1/modelfiles/mf-1/deployments' });
+    assert.equal(response.statusCode, 401);
+    assert.equal(response.json().error.code, 'UNAUTHENTICATED');
+
+    response = await app.inject({
+      method: 'GET',
+      url: '/api/v1/targets/target-1/models/producing-revision?model=custom%3Amodel',
+    });
+    assert.equal(response.statusCode, 401);
+    assert.equal(response.json().error.code, 'UNAUTHENTICATED');
+
     response = await app.inject({ method: 'GET', url: '/api/v1/not-real' });
     assert.equal(response.statusCode, 404);
     assert.equal(response.body.includes('Production ORC'), false);
