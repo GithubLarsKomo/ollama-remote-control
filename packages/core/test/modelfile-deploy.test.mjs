@@ -84,6 +84,18 @@ test('rejects DRAFT and ADAPTER until file/blob authority exists', () => {
   );
 });
 
+test('rejects multiple LICENSE directives because show verification exposes one license field', () => {
+  assert.equal(
+    errorCode(() => compileModelfileForDeploy([
+      'FROM base:latest',
+      'LICENSE """license one"""',
+      'LICENSE """license two"""',
+      '',
+    ].join('\n'))),
+    'DEPLOY_LICENSE_MULTIPLE_UNVERIFIABLE',
+  );
+});
+
 test('rejects ambiguous duplicate non-stop parameters and invalid message roles', () => {
   assert.equal(
     errorCode(() => compileModelfileForDeploy('FROM base:latest\nPARAMETER temperature 0.7\nPARAMETER temperature 0.8\n')),
