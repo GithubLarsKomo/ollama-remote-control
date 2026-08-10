@@ -35,7 +35,8 @@ export type LocalValidationView =
     };
 
 export type PreflightValidationView =
-  | { readonly state: 'not-requested' | 'not-run' }
+  | { readonly state: 'not-requested' }
+  | { readonly state: 'not-run' }
   | {
       readonly state: 'passed';
       readonly planId: string;
@@ -48,7 +49,8 @@ export type PreflightValidationView =
     };
 
 export type TargetValidationView =
-  | { readonly state: 'not-requested' | 'not-run' }
+  | { readonly state: 'not-requested' }
+  | { readonly state: 'not-run' }
   | {
       readonly state: 'verified';
       readonly deploymentId: string;
