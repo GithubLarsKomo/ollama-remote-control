@@ -53,6 +53,93 @@ BEGIN
   ) THEN RAISE(ABORT, 'Modelfile deployment source job is not verified successful create evidence') END;
 END;
 
+CREATE TRIGGER IF NOT EXISTS trg_model_create_verified_deployment
+AFTER UPDATE OF state, result_json, finished_at ON jobs
+WHEN NEW.kind = 'model-create'
+  AND NEW.state = 'succeeded'
+  AND OLD.state <> 'succeeded'
+BEGIN
+  SELECT CASE WHEN
+    NEW.finished_at IS NULL
+    OR json_valid(NEW.result_json) <> 1
+    OR json_extract(NEW.result_json, '$.verified') <> 1
+    OR json_type(NEW.result_json, '$.modelfileId') <> 'text'
+    OR json_type(NEW.result_json, '$.revisionId') <> 'text'
+    OR json_type(NEW.result_json, '$.revisionSha256') <> 'text'
+    OR json_type(NEW.result_json, '$.outputModel') <> 'text'
+    OR json_type(NEW.result_json, '$.digest') <> 'text'
+    OR json_type(NEW.result_json, '$.sizeBytes') <> 'integer'
+    OR json_type(NEW.result_json, '$.baseModel') <> 'text'
+    OR json_type(NEW.result_json, '$.selectedContainerId') <> 'text'
+  THEN RAISE(ABORT, 'Verified model-create result is incomplete for deployment evidence') END;
+
+  INSERT INTO modelfile_deployments(
+    id, target_id, modelfile_id, revision_id, revision_sha256,
+    output_model, model_digest, size_bytes, base_model,
+    source_create_job_id, actor_user_id, selected_container_id, verified_at
+  ) VALUES (
+    NEW.id,
+    NEW.target_id,
+    json_extract(NEW.result_json, '$.modelfileId'),
+    json_extract(NEW.result_json, '$.revisionId'),
+    lower(json_extract(NEW.result_json, '$.revisionSha256')),
+    json_extract(NEW.result_json, '$.outputModel'),
+    lower(json_extract(NEW.result_json, '$.digest')),
+    json_extract(NEW.result_json, '$.sizeBytes'),
+    json_extract(NEW.result_json, '$.baseModel'),
+    NEW.id,
+    NEW.actor_user_id,
+    json_extract(NEW.result_json, '$.selectedContainerId'),
+    NEW.finished_at
+  );
+END;
+
+-- Preserve already-verified deployment evidence when upgrading an existing database.
+-- Rows that cannot be proven against an immutable revision are deliberately not inferred.
+INSERT OR IGNORE INTO modelfile_deployments(
+  id, target_id, modelfile_id, revision_id, revision_sha256,
+  output_model, model_digest, size_bytes, base_model,
+  source_create_job_id, actor_user_id, selected_container_id, verified_at
+)
+SELECT
+  job.id,
+  job.target_id,
+  json_extract(job.result_json, '$.modelfileId'),
+  json_extract(job.result_json, '$.revisionId'),
+  lower(json_extract(job.result_json, '$.revisionSha256')),
+  json_extract(job.result_json, '$.outputModel'),
+  lower(json_extract(job.result_json, '$.digest')),
+  json_extract(job.result_json, '$.sizeBytes'),
+  json_extract(job.result_json, '$.baseModel'),
+  job.id,
+  job.actor_user_id,
+  json_extract(job.result_json, '$.selectedContainerId'),
+  job.finished_at
+FROM jobs job
+JOIN modelfile_revisions revision
+  ON revision.id = json_extract(job.result_json, '$.revisionId')
+ AND revision.modelfile_id = json_extract(job.result_json, '$.modelfileId')
+ AND revision.content_sha256 = lower(json_extract(job.result_json, '$.revisionSha256'))
+WHERE job.kind = 'model-create'
+  AND job.state = 'succeeded'
+  AND job.finished_at IS NOT NULL
+  AND json_valid(job.result_json) = 1
+  AND json_extract(job.result_json, '$.verified') = 1
+  AND json_type(job.result_json, '$.modelfileId') = 'text'
+  AND json_type(job.result_json, '$.revisionId') = 'text'
+  AND json_type(job.result_json, '$.revisionSha256') = 'text'
+  AND json_type(job.result_json, '$.outputModel') = 'text'
+  AND length(json_extract(job.result_json, '$.outputModel')) BETWEEN 1 AND 512
+  AND json_type(job.result_json, '$.digest') = 'text'
+  AND length(json_extract(job.result_json, '$.digest')) = 64
+  AND lower(json_extract(job.result_json, '$.digest')) NOT GLOB '*[^0-9a-f]*'
+  AND json_type(job.result_json, '$.sizeBytes') = 'integer'
+  AND json_extract(job.result_json, '$.sizeBytes') >= 0
+  AND json_type(job.result_json, '$.baseModel') = 'text'
+  AND length(json_extract(job.result_json, '$.baseModel')) BETWEEN 1 AND 512
+  AND json_type(job.result_json, '$.selectedContainerId') = 'text'
+  AND length(json_extract(job.result_json, '$.selectedContainerId')) BETWEEN 1 AND 128;
+
 CREATE TRIGGER IF NOT EXISTS trg_modelfile_deployments_no_update
 BEFORE UPDATE ON modelfile_deployments
 BEGIN
