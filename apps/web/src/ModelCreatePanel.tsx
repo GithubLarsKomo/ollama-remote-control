@@ -89,13 +89,15 @@ export default function ModelCreatePanel({ targetId, disabled, onSignedOut, onSu
 
   useEffect(() => {
     let closed = false;
+    setPlan(null);
+    setJob(null);
+    setProgress([]);
+    setError(null);
+    setNotice(null);
     void readActiveModelCreateJob(targetId)
       .then((response) => {
         if (closed || !response.job) return;
-        setPlan(null);
         setJob(response.job);
-        setProgress([]);
-        setError(null);
         setNotice('Resumed active model-create job. Progress continues from persisted server state.');
       })
       .catch(handleError);
