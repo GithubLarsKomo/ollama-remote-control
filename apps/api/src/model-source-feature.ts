@@ -87,6 +87,7 @@ export function registerModelSourceFeature(
           targetId: detail.targetId,
           model: detail.identity.model,
           sources: {
+            model: resolveModelSourceReference(detail.identity.model),
             from: from ? resolveModelSourceReference(from.reference) : null,
             adapters: detail.provenancePreview.adapters.map((adapter) => resolveModelSourceReference(adapter.reference)),
           },
