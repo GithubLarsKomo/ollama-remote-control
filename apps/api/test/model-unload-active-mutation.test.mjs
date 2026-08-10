@@ -88,7 +88,13 @@ test('active mutation endpoint exposes only safe kind/state and clears after ter
 
     const terminalDatabase = openDatabase(databasePath);
     try {
-      terminalDatabase.prepare(`UPDATE jobs SET state = 'succeeded', finished_at = ? WHERE id = ?`).run(NOW, 'job-secret-id');
+      // This fixture tests only active-lock visibility. It must not invent a verified model-create
+      // success, because successful creates now require immutable deployment evidence.
+      terminalDatabase.prepare(`
+        UPDATE jobs
+        SET state = 'failed', finished_at = ?, error_class = ?
+        WHERE id = ?
+      `).run(NOW, 'TEST_TERMINAL', 'job-secret-id');
     } finally {
       terminalDatabase.close();
     }

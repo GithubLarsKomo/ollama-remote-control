@@ -20,6 +20,10 @@
       "types": "./dist/modelfile-deploy-plans.d.ts",
       "import": "./dist/modelfile-deploy-plans.js"
     },
+    "./modelfile-deployments": {
+      "types": "./dist/modelfile-deployments.d.ts",
+      "import": "./dist/modelfile-deployments.js"
+    },
     "./modelfiles": {
       "types": "./dist/modelfiles.d.ts",
       "import": "./dist/modelfiles.js"
