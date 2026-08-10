@@ -7,6 +7,7 @@ import { registerModelSourceFeature } from './model-source-feature.js';
 import { registerModelUnloadFeature } from './model-unload-feature.js';
 import { registerModelfileDeploymentFeature } from './modelfile-deployment-feature.js';
 import { registerModelfilePortabilityFeature } from './modelfile-portability-feature.js';
+import { registerModelfileValidationFeature } from './modelfile-validation-feature.js';
 import { buildServer } from './server.js';
 import { registerWebAssets } from './web-assets.js';
 
@@ -43,6 +44,9 @@ export function buildProductionServer(environment: NodeJS.ProcessEnv = process.e
     databasePath,
   });
   registerModelfilePortabilityFeature(app, {
+    databasePath,
+  });
+  registerModelfileValidationFeature(app, {
     databasePath,
   });
   registerWebAssets(app, environment.ORC_WEB_DIST_PATH ?? null);
