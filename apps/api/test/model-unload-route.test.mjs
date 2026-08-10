@@ -253,7 +253,7 @@ test('stale digest or already-unloaded confirmation stops before POST /api/gener
       headers: mutationHeaders(cookies), payload: unloadPayload(targetId, DIGEST),
     });
     assert.equal(stale.statusCode, 409);
-    assert.equal(stale.json().error.code, 'MODEL_NOT_LOADED');
+    assert.equal(stale.json().error.code, 'MODEL_UNLOAD_STALE');
     assert.equal(generateCalls, 0);
 
     loaded = false;
