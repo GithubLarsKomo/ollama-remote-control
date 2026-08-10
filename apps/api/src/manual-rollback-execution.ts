@@ -67,10 +67,13 @@ interface SnapshotPayload {
   readonly imageInspect: Record<string, any>;
 }
 
+// targetId is server-internal authority attached to the public candidate before execution.
+type ExecutionCandidate = ManualRollbackCandidate & { readonly targetId: string };
+
 interface PreparedRollback {
   readonly targetId: string;
   readonly hostId: string;
-  readonly candidate: ManualRollbackCandidate;
+  readonly candidate: ExecutionCandidate;
   readonly compose: ComposeSnapshotContext;
   readonly connection: SshPrivateKeyConnection;
 }
@@ -127,16 +130,13 @@ function parseSnapshot(serialized: string): SnapshotPayload {
   }
 }
 
-function confirmationMatches(candidate: ManualRollbackCandidate, confirmation: ManualRollbackConfirmation): boolean {
+function confirmationMatches(candidate: ExecutionCandidate, confirmation: ManualRollbackConfirmation): boolean {
   return confirmation.targetId.trim() === candidate.targetId
     && confirmation.sourceUpdateJobId.trim() === candidate.sourceUpdateJobId
     && confirmation.currentContainerId.trim() === candidate.currentContainerId
     && confirmation.rollbackDigest.trim() === candidate.rollbackDigest
     && confirmation.acknowledgeModelVolumeBoundary === true;
 }
-
-// Candidate targetId is server-internal authority; it is attached before execution.
-type ExecutionCandidate = ManualRollbackCandidate & { readonly targetId: string };
 
 export class ManualRollbackExecutionService {
   constructor(
@@ -200,8 +200,9 @@ export class ManualRollbackExecutionService {
       throw new ManualRollbackExecutionError('ROLLBACK_AUTHORITY_INVALID', 409, 'Rollback snapshot container changed from the derived authority.');
     }
     let compose: ComposeSnapshotContext | null;
-    try { compose = composeContextFromInspect(snapshot.containerInspect); }
-    catch (error) {
+    try {
+      compose = composeContextFromInspect(snapshot.containerInspect);
+    } catch (error) {
       if (error instanceof DockerReconstructError) {
         throw new ManualRollbackExecutionError(error.code, 409, error.message);
       }
@@ -212,9 +213,13 @@ export class ManualRollbackExecutionService {
     }
 
     const host = this.hosts.findHostById(target.hostId);
-    if (!host || !host.enabled) throw new ManualRollbackExecutionError('HOST_NOT_FOUND', 404, 'Host was not found or is disabled.');
+    if (!host || !host.enabled) {
+      throw new ManualRollbackExecutionError('HOST_NOT_FOUND', 404, 'Host was not found or is disabled.');
+    }
     const credential = this.credentials.findByHostId(host.id);
-    if (!credential) throw new ManualRollbackExecutionError('SSH_CREDENTIAL_NOT_FOUND', 409, 'Host has no SSH credential.');
+    if (!credential) {
+      throw new ManualRollbackExecutionError('SSH_CREDENTIAL_NOT_FOUND', 409, 'Host has no SSH credential.');
+    }
     let privateKey: string;
     try {
       privateKey = new SecretCipher(this.masterKey).decrypt(
@@ -257,20 +262,25 @@ export class ManualRollbackExecutionService {
     );
   }
 
-  private failBeforeMutation(
+  private failKnownNoChange(
     jobId: string,
     prepared: PreparedRollback,
     actorUserId: string,
     failure: FailureDescriptor,
+    outcome: 'failed_before_replacement' | 'failed_with_no_remote_change',
   ): never {
     const result = {
-      outcome: 'failed_before_replacement',
+      outcome,
       sourceUpdateJobId: prepared.candidate.sourceUpdateJobId,
       snapshotId: prepared.candidate.snapshotId,
       causeClass: failure.code,
       containerId: prepared.candidate.currentContainerId,
     } as const;
-    try { this.jobs.transition(jobId, 'failed', { result, errorClass: failure.code }); } catch { /* preserve primary */ }
+    try {
+      this.jobs.transition(jobId, 'failed', { result, errorClass: failure.code });
+    } catch {
+      // Preserve the primary rollback failure.
+    }
     try {
       this.audit.record({
         actorUserId,
@@ -280,12 +290,15 @@ export class ManualRollbackExecutionService {
         parameters: {
           sourceUpdateJobId: prepared.candidate.sourceUpdateJobId,
           snapshotId: prepared.candidate.snapshotId,
+          outcome,
         },
         result: 'failed',
         errorClass: failure.code,
         jobId,
       });
-    } catch { /* preserve primary */ }
+    } catch {
+      // Preserve the primary rollback failure.
+    }
     throw new ManualRollbackExecutionError(failure.code, failure.statusCode, failure.message);
   }
 
@@ -295,10 +308,15 @@ export class ManualRollbackExecutionService {
     actorUserId: string,
   ): Promise<ManualRollbackSuccess> {
     let prepared = this.prepare(targetId, confirmation);
-    const job = this.jobs.create({ targetId: prepared.targetId, actorUserId, kind: 'container.rollback', mutating: true });
+    const job = this.jobs.create({
+      targetId: prepared.targetId,
+      actorUserId,
+      kind: 'container.rollback',
+      mutating: true,
+    });
     this.jobs.transition(job.id, 'running');
 
-    // The persistent target lock is now held. Re-derive all local rollback authority before remote mutation.
+    // The persistent target lock is now held. Re-derive all local authority before any remote mutation.
     try {
       const locked = this.prepare(targetId, confirmation);
       if (
@@ -306,12 +324,23 @@ export class ManualRollbackExecutionService {
         || locked.candidate.snapshotId !== prepared.candidate.snapshotId
         || locked.candidate.currentContainerId !== prepared.candidate.currentContainerId
         || locked.candidate.rollbackImageReference !== prepared.candidate.rollbackImageReference
+        || locked.candidate.currentImageReference !== prepared.candidate.currentImageReference
       ) {
-        throw new ManualRollbackExecutionError('ROLLBACK_AUTHORITY_CHANGED', 409, 'Rollback authority changed while acquiring the target lock.');
+        throw new ManualRollbackExecutionError(
+          'ROLLBACK_AUTHORITY_CHANGED',
+          409,
+          'Rollback authority changed while acquiring the target lock.',
+        );
       }
       prepared = locked;
     } catch (error) {
-      return this.failBeforeMutation(job.id, prepared, actorUserId, classifyFailure(error));
+      return this.failKnownNoChange(
+        job.id,
+        prepared,
+        actorUserId,
+        classifyFailure(error),
+        'failed_before_replacement',
+      );
     }
 
     const remote: UpdateRemoteOperations = this.remoteFactory(prepared.connection);
@@ -361,13 +390,21 @@ export class ManualRollbackExecutionService {
       });
 
       if (!this.rebindKnown(prepared.targetId, [prepared.candidate.currentContainerId], rollbackContainerId)) {
-        throw new ManualRollbackExecutionError('ROLLBACK_REBIND_FAILED', 409, 'Target binding could not be moved to the rollback container.');
+        throw new ManualRollbackExecutionError(
+          'ROLLBACK_REBIND_FAILED',
+          409,
+          'Target binding could not be moved to the rollback container.',
+        );
       }
       this.event(job.id, 'rollback_binding_rebound', { containerId: rollbackContainerId });
 
       const health: OllamaHealthResult = await remote.health(prepared.targetId, rollbackContainerId);
       if (health.status !== 'healthy') {
-        throw new ManualRollbackExecutionError('ROLLBACK_HEALTH_DEGRADED', 502, 'Rollback Ollama health verification was degraded.');
+        throw new ManualRollbackExecutionError(
+          'ROLLBACK_HEALTH_DEGRADED',
+          502,
+          'Rollback Ollama health verification was degraded.',
+        );
       }
       this.event(job.id, 'rollback_health_verified', {
         containerId: rollbackContainerId,
@@ -384,7 +421,9 @@ export class ManualRollbackExecutionService {
         containerId: rollbackContainerId,
         rollbackDigest: prepared.candidate.rollbackDigest,
       };
-      this.jobs.transition(job.id, 'succeeded', { result: result as unknown as Readonly<Record<string, unknown>> });
+      this.jobs.transition(job.id, 'succeeded', {
+        result: result as unknown as Readonly<Record<string, unknown>>,
+      });
       try {
         this.audit.record({
           actorUserId,
@@ -401,24 +440,62 @@ export class ManualRollbackExecutionService {
           result: 'succeeded',
           jobId: job.id,
         });
-      } catch { /* terminal rollback remains successful */ }
+      } catch {
+        // A terminal verified rollback remains successful if the secondary audit append fails.
+      }
       return result;
     } catch (error) {
       const primary = classifyFailure(error);
-      if (!replacementAttempted) return this.failBeforeMutation(job.id, prepared, actorUserId, primary);
+      if (!replacementAttempted) {
+        return this.failKnownNoChange(
+          job.id,
+          prepared,
+          actorUserId,
+          primary,
+          'failed_before_replacement',
+        );
+      }
 
       let remoteContainerId = rollbackContainerId;
       if (!remoteContainerId) {
-        try { remoteContainerId = await remote.resolveComposeContainer(prepared.compose); }
-        catch {
+        try {
+          remoteContainerId = await remote.resolveComposeContainer(prepared.compose);
+        } catch {
           const result = {
             outcome: 'rollback_failed_restore_failed',
             sourceUpdateJobId: prepared.candidate.sourceUpdateJobId,
+            snapshotId: prepared.candidate.snapshotId,
             causeClass: primary.code,
             restoreCauseClass: 'REMOTE_STATE_UNRESOLVED',
             lastKnownContainerId: prepared.candidate.currentContainerId,
           } as const;
-          try { this.jobs.transition(job.id, 'failed', { result, errorClass: 'MANUAL_ROLLBACK_FAILED_RESTORE_FAILED' }); } catch { /* preserve */ }
+          try {
+            this.jobs.transition(job.id, 'failed', {
+              result,
+              errorClass: 'MANUAL_ROLLBACK_FAILED_RESTORE_FAILED',
+            });
+          } catch {
+            // Preserve the primary ambiguous remote-state failure.
+          }
+          try {
+            this.audit.record({
+              actorUserId,
+              hostId: prepared.hostId,
+              targetId: prepared.targetId,
+              action: 'container.rollback.restore_failed',
+              parameters: {
+                sourceUpdateJobId: prepared.candidate.sourceUpdateJobId,
+                causeClass: primary.code,
+                restoreCauseClass: 'REMOTE_STATE_UNRESOLVED',
+                lastKnownContainerId: prepared.candidate.currentContainerId,
+              },
+              result: 'failed',
+              errorClass: 'MANUAL_ROLLBACK_FAILED_RESTORE_FAILED',
+              jobId: job.id,
+            });
+          } catch {
+            // Preserve the terminal failure classification.
+          }
           throw new ManualRollbackExecutionError(
             'MANUAL_ROLLBACK_FAILED_RESTORE_FAILED',
             502,
@@ -428,7 +505,13 @@ export class ManualRollbackExecutionService {
       }
 
       if (remoteContainerId === prepared.candidate.currentContainerId) {
-        return this.failBeforeMutation(job.id, prepared, actorUserId, primary);
+        return this.failKnownNoChange(
+          job.id,
+          prepared,
+          actorUserId,
+          primary,
+          'failed_with_no_remote_change',
+        );
       }
 
       this.event(job.id, 'restore_started', {
@@ -449,15 +532,27 @@ export class ManualRollbackExecutionService {
         });
         if (!this.rebindKnown(
           prepared.targetId,
-          [prepared.candidate.currentContainerId, remoteContainerId, ...(rollbackContainerId ? [rollbackContainerId] : [])],
+          [
+            prepared.candidate.currentContainerId,
+            remoteContainerId,
+            ...(rollbackContainerId ? [rollbackContainerId] : []),
+          ],
           restored.containerId,
         )) {
-          throw new ManualRollbackExecutionError('RESTORE_REBIND_FAILED', 409, 'Target binding could not be restored to the pre-rollback image.');
+          throw new ManualRollbackExecutionError(
+            'RESTORE_REBIND_FAILED',
+            409,
+            'Target binding could not be restored to the pre-rollback image.',
+          );
         }
         this.event(job.id, 'restore_binding_rebound', { containerId: restored.containerId });
         const health = await remote.health(prepared.targetId, restored.containerId);
         if (health.status !== 'healthy') {
-          throw new ManualRollbackExecutionError('RESTORE_HEALTH_DEGRADED', 502, 'Restored pre-rollback container health verification was degraded.');
+          throw new ManualRollbackExecutionError(
+            'RESTORE_HEALTH_DEGRADED',
+            502,
+            'Restored pre-rollback container health verification was degraded.',
+          );
         }
         this.event(job.id, 'restore_health_verified', {
           containerId: restored.containerId,
@@ -471,7 +566,10 @@ export class ManualRollbackExecutionService {
           failedRollbackContainerId: remoteContainerId,
           restoredContainerId: restored.containerId,
         } as const;
-        this.jobs.transition(job.id, 'failed', { result, errorClass: 'MANUAL_ROLLBACK_FAILED_CURRENT_RESTORED' });
+        this.jobs.transition(job.id, 'failed', {
+          result,
+          errorClass: 'MANUAL_ROLLBACK_FAILED_CURRENT_RESTORED',
+        });
         try {
           this.audit.record({
             actorUserId,
@@ -487,7 +585,9 @@ export class ManualRollbackExecutionService {
             errorClass: 'MANUAL_ROLLBACK_FAILED_CURRENT_RESTORED',
             jobId: job.id,
           });
-        } catch { /* preserve terminal result */ }
+        } catch {
+          // Preserve the terminal result.
+        }
         throw new ManualRollbackExecutionError(
           'MANUAL_ROLLBACK_FAILED_CURRENT_RESTORED',
           502,
@@ -497,7 +597,9 @@ export class ManualRollbackExecutionService {
         if (
           restoreError instanceof ManualRollbackExecutionError
           && restoreError.code === 'MANUAL_ROLLBACK_FAILED_CURRENT_RESTORED'
-        ) throw restoreError;
+        ) {
+          throw restoreError;
+        }
         const restoreFailure = classifyFailure(restoreError);
         let lastKnownContainerId = remoteContainerId;
         try {
@@ -505,10 +607,16 @@ export class ManualRollbackExecutionService {
           lastKnownContainerId = resolved;
           this.rebindKnown(
             prepared.targetId,
-            [prepared.candidate.currentContainerId, remoteContainerId, ...(rollbackContainerId ? [rollbackContainerId] : [])],
+            [
+              prepared.candidate.currentContainerId,
+              remoteContainerId,
+              ...(rollbackContainerId ? [rollbackContainerId] : []),
+            ],
             resolved,
           );
-        } catch { /* best-effort consistency only */ }
+        } catch {
+          // Best-effort local binding consistency only; remote state remains unresolved/unsafe.
+        }
         const result = {
           outcome: 'rollback_failed_restore_failed',
           sourceUpdateJobId: prepared.candidate.sourceUpdateJobId,
@@ -517,7 +625,14 @@ export class ManualRollbackExecutionService {
           restoreCauseClass: restoreFailure.code,
           lastKnownContainerId,
         } as const;
-        try { this.jobs.transition(job.id, 'failed', { result, errorClass: 'MANUAL_ROLLBACK_FAILED_RESTORE_FAILED' }); } catch { /* preserve */ }
+        try {
+          this.jobs.transition(job.id, 'failed', {
+            result,
+            errorClass: 'MANUAL_ROLLBACK_FAILED_RESTORE_FAILED',
+          });
+        } catch {
+          // Preserve the terminal failure classification.
+        }
         try {
           this.audit.record({
             actorUserId,
@@ -534,7 +649,9 @@ export class ManualRollbackExecutionService {
             errorClass: 'MANUAL_ROLLBACK_FAILED_RESTORE_FAILED',
             jobId: job.id,
           });
-        } catch { /* preserve terminal failure */ }
+        } catch {
+          // Preserve the terminal failure classification.
+        }
         throw new ManualRollbackExecutionError(
           'MANUAL_ROLLBACK_FAILED_RESTORE_FAILED',
           502,
