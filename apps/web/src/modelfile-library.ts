@@ -118,6 +118,21 @@ export function appendLocalModelfileRevision(
   });
 }
 
+export function cloneLocalModelfileRevision(
+  modelfileId: string,
+  revisionId: string,
+  input: {
+    readonly displayName: string;
+    readonly description?: string;
+  },
+): Promise<{ readonly modelfile: ModelfileView }> {
+  return requestJson(`${modelfilePath(modelfileId)}/revisions/${encodeURIComponent(revisionId)}/clone`, {
+    method: 'POST',
+    headers: mutationHeaders(),
+    body: JSON.stringify(input),
+  });
+}
+
 export function importInstalledModelfile(input: {
   readonly targetId: string;
   readonly model: string;
@@ -129,4 +144,34 @@ export function importInstalledModelfile(input: {
     headers: mutationHeaders(),
     body: JSON.stringify(input),
   });
+}
+
+export function modelfileExportFilename(displayName: string, revisionNumber: number): string {
+  const normalized = displayName.normalize('NFKC').trim();
+  const stem = normalized
+    .replace(/[^\p{L}\p{N}._-]+/gu, '-')
+    .replace(/^-+|-+$/gu, '')
+    .replace(/^\.+|\.+$/gu, '')
+    .slice(0, 80) || 'modelfile';
+  const revision = Number.isSafeInteger(revisionNumber) && revisionNumber > 0 ? revisionNumber : 1;
+  return `${stem}-r${revision}.Modelfile`;
+}
+
+export function downloadModelfileRevision(input: {
+  readonly displayName: string;
+  readonly revisionNumber: number;
+  readonly rawText: string;
+}): void {
+  const blob = new Blob([input.rawText], { type: 'text/plain;charset=utf-8' });
+  const url = URL.createObjectURL(blob);
+  const anchor = document.createElement('a');
+  anchor.href = url;
+  anchor.download = modelfileExportFilename(input.displayName, input.revisionNumber);
+  anchor.style.display = 'none';
+  document.body.appendChild(anchor);
+  try { anchor.click(); }
+  finally {
+    anchor.remove();
+    URL.revokeObjectURL(url);
+  }
 }
