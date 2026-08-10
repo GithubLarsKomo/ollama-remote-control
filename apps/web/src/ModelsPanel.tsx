@@ -21,6 +21,10 @@ import {
   type ModelInventoryView,
   type RunningModelView,
 } from './model-inventory.js';
+import {
+  readActiveTargetMutation,
+  type ActiveTargetMutationView,
+} from './model-unload.js';
 import './models.css';
 
 interface ModelsPanelProps {
@@ -85,6 +89,8 @@ function RunningModelCard({
 export default function ModelsPanel({ status, disabled, onSignedOut }: ModelsPanelProps) {
   const [inventory, setInventory] = useState<ModelInventoryView | null>(null);
   const [selectedModel, setSelectedModel] = useState<string | null>(null);
+  const [activeMutation, setActiveMutation] = useState<ActiveTargetMutationView | null>(null);
+  const [mutationCheckBusy, setMutationCheckBusy] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -109,6 +115,26 @@ export default function ModelsPanel({ status, disabled, onSignedOut }: ModelsPan
     }
   }, [disabled, onSignedOut, status.container.running, status.target.id]);
 
+  const loadActiveMutation = useCallback(async () => {
+    if (!status.container.running) {
+      setActiveMutation(null);
+      setMutationCheckBusy(false);
+      return;
+    }
+    setMutationCheckBusy(true);
+    try {
+      setActiveMutation(await readActiveTargetMutation(status.target.id));
+    } catch (loadError) {
+      if (loadError instanceof ApiError && loadError.status === 401) {
+        onSignedOut();
+        return;
+      }
+      setActiveMutation(null);
+    } finally {
+      setMutationCheckBusy(false);
+    }
+  }, [onSignedOut, status.container.running, status.target.id]);
+
   useEffect(() => {
     if (!status.container.running) {
       setInventory(null);
@@ -119,6 +145,17 @@ export default function ModelsPanel({ status, disabled, onSignedOut }: ModelsPan
     void load();
   }, [load, status.container.running]);
 
+  useEffect(() => {
+    if (!status.container.running) {
+      setActiveMutation(null);
+      setMutationCheckBusy(false);
+      return undefined;
+    }
+    void loadActiveMutation();
+    const timer = window.setInterval(() => void loadActiveMutation(), 1_500);
+    return () => window.clearInterval(timer);
+  }, [loadActiveMutation, status.container.running]);
+
   const summary = useMemo(
     () => inventory ? summarizeModelInventory(inventory) : null,
     [inventory],
@@ -127,6 +164,12 @@ export default function ModelsPanel({ status, disabled, onSignedOut }: ModelsPan
     () => inventory ? runningModelDigests(inventory) : new Set<string>(),
     [inventory],
   );
+  const unloadDisabled = disabled || busy || mutationCheckBusy || Boolean(activeMutation);
+
+  const refreshAfterUnload = useCallback(async () => {
+    await load();
+    await loadActiveMutation();
+  }, [load, loadActiveMutation]);
 
   return (
     <section className="models-panel" aria-labelledby="models-title">
@@ -247,17 +290,22 @@ export default function ModelsPanel({ status, disabled, onSignedOut }: ModelsPan
               <p className="muted">Equivalent to the read-only inventory behind <code>ollama ps</code>. Unload uses a fixed <code>keep_alive: 0</code> operation and succeeds only after a fresh loaded-model check.</p>
             </div>
           </div>
+          {activeMutation ? (
+            <p className="models-notice" role="status">
+              Target mutation active: <strong>{activeMutation.kind}</strong> ({activeMutation.state}). Unload controls are disabled until the persistent target lock is released.
+            </p>
+          ) : null}
           {inventory.running.length === 0 ? (
             <p className="models-notice">No models are currently loaded in Ollama memory.</p>
           ) : (
             <div className="running-model-grid">
               {inventory.running.map((model) => (
                 <RunningModelCard
-                  disabled={disabled || busy}
+                  disabled={unloadDisabled}
                   key={`${model.digest}:${model.model}`}
                   model={model}
                   onSignedOut={onSignedOut}
-                  onUnloaded={load}
+                  onUnloaded={refreshAfterUnload}
                   targetId={status.target.id}
                   targetName={status.target.displayName}
                 />
