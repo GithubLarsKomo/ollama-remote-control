@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { ApiError } from './api.js';
 import { formatTimestamp } from './format.js';
+import ModelfileLifecyclePanel from './ModelfileLifecyclePanel.js';
 import {
   listLocalModelfileRevisions,
   listLocalModelfiles,
@@ -194,6 +195,10 @@ export default function ModelCreatePanel({ targetId, disabled, onSignedOut, onSu
     () => revisions.find((item) => item.id === revisionId) ?? null,
     [revisionId, revisions],
   );
+  const historicalRevisionSelected = Boolean(
+    selectedArtifact && selectedRevision && selectedRevision.id !== selectedArtifact.currentRevisionId,
+  );
+  const lifecycleRefreshKey = `${plan?.planId ?? 'no-plan'}:${job?.id ?? 'no-job'}:${job?.state ?? 'no-state'}`;
 
   async function preparePlan() {
     if (!artifactId || !revisionId || !outputModel.trim()) return;
@@ -272,7 +277,7 @@ export default function ModelCreatePanel({ targetId, disabled, onSignedOut, onSu
           <select disabled={disabled || busy || !artifactId || Boolean(job && !terminal(job))} onChange={(event) => setRevisionId(event.target.value)} value={revisionId}>
             {revisions.map((revision) => (
               <option key={revision.id} value={revision.id}>
-                r{revision.revisionNumber}{revision.id === selectedArtifact?.currentRevisionId ? ' · current' : ''} · {shortHash(revision.contentSha256)}
+                r{revision.revisionNumber}{revision.id === selectedArtifact?.currentRevisionId ? ' · current' : ' · historical'} · {shortHash(revision.contentSha256)}
               </option>
             ))}
           </select>
@@ -293,9 +298,27 @@ export default function ModelCreatePanel({ targetId, disabled, onSignedOut, onSu
           onClick={() => void preparePlan()}
           type="button"
         >
-          {busy && !plan ? 'Planning…' : 'Create deploy plan'}
+          {busy && !plan ? 'Planning…' : 'Create fresh deploy plan'}
         </button>
       </div>
+
+      {historicalRevisionSelected ? (
+        <p className="models-notice" role="note">
+          Historical immutable revision selected. Redeployment always creates a fresh server-side plan and still refuses an existing destination model; selecting an older revision does not enable overwrite or reuse stale authority.
+        </p>
+      ) : null}
+
+      {artifactId && revisionId ? (
+        <ModelfileLifecyclePanel
+          disabled={disabled || busy}
+          modelfileId={artifactId}
+          onSignedOut={onSignedOut}
+          outputModel={outputModel}
+          refreshKey={lifecycleRefreshKey}
+          revisionId={revisionId}
+          targetId={targetId}
+        />
+      ) : null}
 
       {plan ? (
         <section className="model-create-plan" aria-label="Deploy plan confirmation">
