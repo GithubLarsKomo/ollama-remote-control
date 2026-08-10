@@ -41,6 +41,7 @@ import {
   ManualRollbackExecutionService,
   type ManualRollbackConfirmation,
 } from './manual-rollback-execution.js';
+import { ManualRollbackReconciliationService } from './manual-rollback-reconciliation.js';
 import { OllamaHealthService } from './ollama-health.js';
 import {
   createSshUpdateRemoteFactory,
@@ -138,6 +139,7 @@ export function registerManualRollbackFeature(
     masterKey,
   );
   const health = new OllamaHealthService(hosts, credentials, targets, masterKey);
+  const remoteFactory = options.remoteFactory ?? createSshUpdateRemoteFactory(health);
   const rollbackExecution = new ManualRollbackExecutionService(
     hosts,
     credentials,
@@ -148,9 +150,25 @@ export function registerManualRollbackFeature(
     rollbackCandidate,
     jobs,
     audit,
-    options.remoteFactory ?? createSshUpdateRemoteFactory(health),
+    remoteFactory,
     now,
   );
+  const rollbackReconciliation = new ManualRollbackReconciliationService(
+    hosts,
+    credentials,
+    targets,
+    bindings,
+    snapshots,
+    masterKey,
+    jobs,
+    audit,
+    remoteFactory,
+    now,
+  );
+
+  app.addHook('onReady', async () => {
+    await rollbackReconciliation.reconcile();
+  });
 
   function requireAuthenticated(request: FastifyRequest) {
     const session = auth.getSession(parseCookies(request.headers.cookie)[SESSION_COOKIE]);
