@@ -1,5 +1,6 @@
 import { pathToFileURL } from 'node:url';
 import { registerAuditFeature } from './audit-feature.js';
+import { registerManualRollbackFeature } from './manual-rollback-feature.js';
 import { registerModelCreateFeature } from './model-create-feature.js';
 import { registerModelSmokeFeature } from './model-smoke-feature.js';
 import { registerModelSourceFeature } from './model-source-feature.js';
@@ -16,6 +17,10 @@ export function buildProductionServer(environment: NodeJS.ProcessEnv = process.e
   });
   registerAuditFeature(app, {
     databasePath,
+  });
+  registerManualRollbackFeature(app, {
+    databasePath,
+    environment,
   });
   registerModelCreateFeature(app, {
     databasePath,
