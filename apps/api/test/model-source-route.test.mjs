@@ -159,37 +159,41 @@ test('source route resolves observed hf.co identity while refusing local generat
       headers: { cookie: cookieHeader(cookies) },
     });
     assert.equal(response.statusCode, 200);
-    assert.deepEqual(response.json(), {
-      targetId,
-      model: MODEL,
-      sources: {
-        model: {
-          reference: MODEL,
+    const payload = response.json();
+    assert.equal(payload.targetId, targetId);
+    assert.equal(payload.model, MODEL);
+    assert.deepEqual(payload.sources, {
+      model: {
+        reference: MODEL,
+        state: 'resolved',
+        provider: 'huggingface',
+        url: 'https://huggingface.co/unsloth/Qwen3.5-9B-GGUF',
+      },
+      from: {
+        reference: '/root/.ollama/models/blobs/sha256:deadbeef',
+        state: 'local-artifact',
+        provider: null,
+        url: null,
+      },
+      adapters: [
+        {
+          reference: 'hf.co/example/adapter-repo:Q4_K_M',
           state: 'resolved',
           provider: 'huggingface',
-          url: 'https://huggingface.co/unsloth/Qwen3.5-9B-GGUF',
+          url: 'https://huggingface.co/example/adapter-repo',
         },
-        from: {
-          reference: '/root/.ollama/models/blobs/sha256:deadbeef',
+        {
+          reference: '/srv/local/adapter.gguf',
           state: 'local-artifact',
           provider: null,
           url: null,
         },
-        adapters: [
-          {
-            reference: 'hf.co/example/adapter-repo:Q4_K_M',
-            state: 'resolved',
-            provider: 'huggingface',
-            url: 'https://huggingface.co/example/adapter-repo',
-          },
-          {
-            reference: '/srv/local/adapter.gguf',
-            state: 'local-artifact',
-            provider: null,
-            url: null,
-          },
-        ],
-      },
+      ],
+    });
+    assert.deepEqual(payload.graph, {
+      currentNodeId: `installed:${DIGEST}`,
+      nodes: [{ id: `installed:${DIGEST}`, kind: 'installed-model', model: MODEL, digest: DIGEST }],
+      edges: [],
     });
     assert.deepEqual(requests, [
       { method: 'GET', url: '/api/tags', body: null },
