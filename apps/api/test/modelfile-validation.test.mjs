@@ -66,7 +66,7 @@ test('local validation is deterministic and target evidence remains explicitly n
 test('local compile failure is surfaced without inventing preflight or target success', () => {
   const result = fixture({ raw: 'PARAMETER num_ctx 8192\n' }).read('mf-1', 'rev-1');
   assert.equal(result.local.state, 'failed');
-  assert.equal(result.local.code, 'DEPLOY_FROM_REQUIRED');
+  assert.equal(result.local.code, 'DEPLOY_SOURCE_DIAGNOSTICS');
   assert.deepEqual(result.preflight, { state: 'not-requested' });
   assert.deepEqual(result.targetVerification, { state: 'not-requested' });
 });
@@ -81,6 +81,9 @@ test('historical passed preflight is distinct from current execution authority a
   assert.equal(result.preflight.authorityState, 'consumed');
 
   result = fixture({ plan: plan({ expiresAt: '2026-08-10T12:59:59.000Z' }) }).read('mf-1', 'rev-1', 'target-1', 'custom:model');
+  assert.equal(result.preflight.authorityState, 'expired');
+
+  result = fixture({ plan: plan({ expiresAt: 'not-a-timestamp' }) }).read('mf-1', 'rev-1', 'target-1', 'custom:model');
   assert.equal(result.preflight.authorityState, 'expired');
 
   result = fixture({ plan: plan(), selectedContainerId: 'container-2' }).read('mf-1', 'rev-1', 'target-1', 'custom:model');
