@@ -12,6 +12,7 @@ import {
   confirmModelfileDeploy,
   createModelfileDeployPlan,
   modelCreateEventUrl,
+  readActiveModelCreateJob,
   readModelCreateJob,
   type ModelfileDeployPlanView,
   type PublicCreateJob,
@@ -87,11 +88,28 @@ export default function ModelCreatePanel({ targetId, disabled, onSignedOut, onSu
   useEffect(() => { void loadArtifacts(); }, [loadArtifacts]);
 
   useEffect(() => {
+    let closed = false;
+    void readActiveModelCreateJob(targetId)
+      .then((response) => {
+        if (closed || !response.job) return;
+        setPlan(null);
+        setJob(response.job);
+        setProgress([]);
+        setError(null);
+        setNotice('Resumed active model-create job. Progress continues from persisted server state.');
+      })
+      .catch(handleError);
+    return () => { closed = true; };
+  }, [handleError, targetId]);
+
+  useEffect(() => {
     setPlan(null);
-    setJob(null);
-    setProgress([]);
-    setError(null);
-    setNotice(null);
+    if (!job || terminal(job)) {
+      setJob(null);
+      setProgress([]);
+      setError(null);
+      setNotice(null);
+    }
     if (!artifactId) {
       setRevisions([]);
       setRevisionId('');
@@ -110,6 +128,7 @@ export default function ModelCreatePanel({ targetId, disabled, onSignedOut, onSu
   }, [artifactId, artifacts, handleError]);
 
   useEffect(() => {
+    if (job && !terminal(job)) return;
     setPlan(null);
     setJob(null);
     setProgress([]);
