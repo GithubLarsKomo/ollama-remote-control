@@ -5,6 +5,7 @@ import { registerModelCreateFeature } from './model-create-feature.js';
 import { registerModelSmokeFeature } from './model-smoke-feature.js';
 import { registerModelSourceFeature } from './model-source-feature.js';
 import { registerModelUnloadFeature } from './model-unload-feature.js';
+import { registerModelfileDeploymentFeature } from './modelfile-deployment-feature.js';
 import { registerModelfilePortabilityFeature } from './modelfile-portability-feature.js';
 import { buildServer } from './server.js';
 import { registerWebAssets } from './web-assets.js';
@@ -37,6 +38,9 @@ export function buildProductionServer(environment: NodeJS.ProcessEnv = process.e
   registerModelUnloadFeature(app, {
     databasePath,
     environment,
+  });
+  registerModelfileDeploymentFeature(app, {
+    databasePath,
   });
   registerModelfilePortabilityFeature(app, {
     databasePath,
