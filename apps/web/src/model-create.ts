@@ -10,6 +10,10 @@ export interface ModelfileDeployPlanView {
   readonly revisionSha256: string;
   readonly outputModel: string;
   readonly baseModel: string;
+  readonly replacement: null | {
+    readonly existingDigest: string;
+    readonly existingSizeBytes: number;
+  };
   readonly apiVersion: string;
   readonly directiveCounts: Readonly<Record<string, number>>;
   readonly expectedFields: readonly string[];
@@ -71,11 +75,12 @@ export function createModelfileDeployPlan(
   modelfileId: string,
   revisionId: string,
   outputModel: string,
+  replaceExisting = false,
 ): Promise<{ readonly plan: ModelfileDeployPlanView }> {
   return requestJson(`${revisionPath(targetId, modelfileId, revisionId)}/deploy-plan`, {
     method: 'POST',
     headers: mutationHeaders(),
-    body: JSON.stringify({ outputModel }),
+    body: JSON.stringify({ outputModel, replaceExisting }),
   });
 }
 
