@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { activePersistedSource } from './ProvenanceSourceCorrectionPanel.js';
 import {
   correctModelSource,
+  recordModelLineage,
   type PersistedProvenanceSourceView,
 } from './model-inventory.js';
 
@@ -53,7 +54,7 @@ describe('activePersistedSource', () => {
   });
 });
 
-describe('correctModelSource', () => {
+describe('provenance mutation clients', () => {
   it('posts only correction evidence to the persisted node with CSRF, never browser target/model/digest authority', async () => {
     vi.stubGlobal('document', { cookie: 'orc_csrf=csrf%20token' });
     const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
@@ -94,6 +95,46 @@ describe('correctModelSource', () => {
     });
 
     expect(result.id).toBe('source-2');
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('posts only allowlisted lineage evidence to the persisted node with CSRF', async () => {
+    vi.stubGlobal('document', { cookie: 'orc_csrf=lineage-token' });
+    const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
+      expect(url).toBe('/api/v1/provenance/nodes/node-installed/lineage');
+      expect(init?.method).toBe('POST');
+      expect(init?.headers).toMatchObject({ 'x-csrf-token': 'lineage-token' });
+      const body = JSON.parse(String(init?.body));
+      expect(body).toEqual({
+        relation: 'quantized-from',
+        parentModel: 'hf.co/example/base:FP16',
+        confidence: 'high',
+      });
+      expect(body).not.toHaveProperty('targetId');
+      expect(body).not.toHaveProperty('modelDigest');
+      return new Response(JSON.stringify({
+        parentNode: {
+          id: 'parent-node', identityKey: 'model-reference:hf.co/example/base:FP16', kind: 'model-reference',
+          targetId: null, modelName: 'hf.co/example/base:FP16', modelDigest: null, revisionId: null,
+          createdAt: '2026-08-11T13:00:00.000Z',
+        },
+        edge: {
+          id: 'edge-1', fromNodeId: 'parent-node', toNodeId: 'node-installed', relation: 'quantized-from',
+          origin: 'operator', confidence: 'high', sourceJobId: null, actorUserId: 'user-1',
+          createdAt: '2026-08-11T13:00:00.000Z',
+        },
+      }), { status: 201, headers: { 'content-type': 'application/json' } });
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    const result = await recordModelLineage('node-installed', {
+      relation: 'quantized-from',
+      parentModel: 'hf.co/example/base:FP16',
+      confidence: 'high',
+    });
+
+    expect(result.edge.relation).toBe('quantized-from');
+    expect(result.edge.origin).toBe('operator');
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 });

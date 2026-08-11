@@ -42,6 +42,11 @@ import {
   SqliteModelProvenanceEvidenceStore,
 } from './model-provenance-graph.js';
 import {
+  ProvenanceLineageError,
+  ProvenanceLineageService,
+  type ProvenanceLineageInput,
+} from './provenance-lineage.js';
+import {
   ProvenanceSourceCorrectionError,
   ProvenanceSourceCorrectionService,
   type ProvenanceSourceCorrectionInput,
@@ -63,7 +68,12 @@ function csrfHeader(value: string | string[] | undefined): string | undefined {
 }
 
 function sendFeatureError(reply: FastifyReply, error: unknown): FastifyReply {
-  if (error instanceof AuthError || error instanceof OllamaModelDetailError || error instanceof ProvenanceSourceCorrectionError) {
+  if (
+    error instanceof AuthError
+    || error instanceof OllamaModelDetailError
+    || error instanceof ProvenanceSourceCorrectionError
+    || error instanceof ProvenanceLineageError
+  ) {
     return reply.code(error.statusCode).send({ error: { code: error.code, message: error.message } });
   }
   throw error;
@@ -94,11 +104,9 @@ export function registerModelSourceFeature(
   );
   const provenance = new SqliteModelProvenanceEvidenceStore(database);
   const persistedProvenance = new SqliteProvenanceRepository(database);
-  const corrections = new ProvenanceSourceCorrectionService(
-    database,
-    new AuditService(new SqliteAuditRepository(database), now),
-    now,
-  );
+  const audit = new AuditService(new SqliteAuditRepository(database), now);
+  const corrections = new ProvenanceSourceCorrectionService(database, audit, now);
+  const lineage = new ProvenanceLineageService(database, audit, now);
 
   function requireAuthenticated(request: FastifyRequest) {
     const session = auth.getSession(parseCookies(request.headers.cookie)[SESSION_COOKIE]);
@@ -160,6 +168,19 @@ export function registerModelSourceFeature(
         const session = requireAuthenticatedMutation(request);
         const source = corrections.correct(session.userId, request.params.nodeId, request.body ?? {});
         return reply.code(201).send({ source });
+      } catch (error) {
+        return sendFeatureError(reply, error);
+      }
+    },
+  );
+
+  app.post<{ Params: ProvenanceNodeParams; Body: ProvenanceLineageInput }>(
+    '/api/v1/provenance/nodes/:nodeId/lineage',
+    async (request, reply) => {
+      try {
+        const session = requireAuthenticatedMutation(request);
+        const recorded = lineage.record(session.userId, request.params.nodeId, request.body ?? {});
+        return reply.code(201).send(recorded);
       } catch (error) {
         return sendFeatureError(reply, error);
       }

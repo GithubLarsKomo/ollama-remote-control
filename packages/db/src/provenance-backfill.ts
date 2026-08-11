@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto';
+import { parseModelfile } from '@orc/core/modelfile-parser';
 import type { StoredProvenanceEdge, StoredProvenanceNode } from '@orc/core/provenance';
 import type { DatabaseConnection } from './index.js';
 import { SqliteProvenanceRepository } from './provenance.js';
@@ -14,6 +15,21 @@ function safeModel(value: unknown): string | null {
   if (typeof value !== 'string') return null;
   const model = value.trim();
   if (!model || model.length > 512 || !/^[A-Za-z0-9][A-Za-z0-9._/:@+-]*$/u.test(model)) return null;
+  return model;
+}
+
+function safeLineageModelReference(value: unknown): string | null {
+  const model = safeModel(value);
+  if (!model) return null;
+  const lower = model.toLowerCase();
+  if (
+    model.startsWith('/')
+    || model.startsWith('./')
+    || model.startsWith('../')
+    || /^[A-Za-z]:\//u.test(model)
+    || lower.startsWith('sha256:')
+    || lower.includes('/blobs/sha256:')
+  ) return null;
   return model;
 }
 
@@ -39,6 +55,23 @@ function referenceIdentity(model: string): string {
 
 function revisionIdentity(revisionId: string): string {
   return `revision:${revisionId}`;
+}
+
+function explicitAdapterReferences(rawText: unknown): readonly string[] {
+  if (typeof rawText !== 'string') return [];
+  try {
+    const parsed = parseModelfile(rawText);
+    if (parsed.diagnostics.some((item) => item.severity === 'error')) return [];
+    const adapters = new Set<string>();
+    for (const node of parsed.nodes) {
+      if (node.kind !== 'directive' || node.name !== 'ADAPTER') continue;
+      const reference = safeLineageModelReference(node.argument);
+      if (reference) adapters.add(reference);
+    }
+    return [...adapters].sort();
+  } catch {
+    return [];
+  }
 }
 
 function ensureExactEdge(database: DatabaseConnection, edge: StoredProvenanceEdge): void {
@@ -70,6 +103,36 @@ function ensureExactEdge(database: DatabaseConnection, edge: StoredProvenanceEdg
   new SqliteProvenanceRepository(database).appendEdge(edge);
 }
 
+function materializeAdapters(
+  database: DatabaseConnection,
+  repository: SqliteProvenanceRepository,
+  installed: StoredProvenanceNode,
+  rawText: unknown,
+  evidenceKey: string,
+  actorUserId: string,
+  createdAt: string,
+  sourceJobId: string | null,
+): void {
+  for (const adapterModel of explicitAdapterReferences(rawText)) {
+    const adapter = repository.ensureNode({
+      id: hashId('prov-reference', referenceIdentity(adapterModel)),
+      identityKey: referenceIdentity(adapterModel),
+      kind: 'model-reference', targetId: null, modelName: adapterModel, modelDigest: null, revisionId: null, createdAt,
+    });
+    ensureExactEdge(database, {
+      id: hashId('prov-adapter-edge', `${evidenceKey}:${adapterModel}`),
+      fromNodeId: adapter.id,
+      toNodeId: installed.id,
+      relation: 'adapter',
+      origin: 'observed',
+      confidence: 'high',
+      sourceJobId,
+      actorUserId,
+      createdAt,
+    });
+  }
+}
+
 export interface ProvenanceBackfillResult {
   readonly importsProcessed: number;
   readonly deploymentsProcessed: number;
@@ -81,7 +144,8 @@ export function backfillVerifiedProvenanceEvidence(database: DatabaseConnection)
   let deploymentsProcessed = 0;
 
   const imports = database.prepare(`
-    SELECT id AS revision_id, imported_target_id, imported_model, imported_digest, created_by_user_id, created_at
+    SELECT id AS revision_id, imported_target_id, imported_model, imported_digest,
+           raw_text, created_by_user_id, created_at
     FROM modelfile_revisions
     WHERE source_kind = 'installed-model-import'
       AND imported_target_id IS NOT NULL
@@ -121,14 +185,17 @@ export function backfillVerifiedProvenanceEvidence(database: DatabaseConnection)
       actorUserId,
       createdAt,
     });
+    materializeAdapters(database, repository, installed, row.raw_text, `import:${revisionId}:${targetId}:${model}:${digest}`, actorUserId, createdAt, null);
     importsProcessed += 1;
   }
 
   const deployments = database.prepare(`
-    SELECT target_id, revision_id, output_model, model_digest, base_model,
-           source_create_job_id, actor_user_id, verified_at
-    FROM modelfile_deployments
-    ORDER BY verified_at, id
+    SELECT deployment.target_id, deployment.revision_id, deployment.output_model,
+           deployment.model_digest, deployment.base_model, deployment.source_create_job_id,
+           deployment.actor_user_id, deployment.verified_at, revision.raw_text
+    FROM modelfile_deployments deployment
+    JOIN modelfile_revisions revision ON revision.id = deployment.revision_id
+    ORDER BY deployment.verified_at, deployment.id
     LIMIT ${MAX_EVIDENCE_ROWS}
   `).all();
 
@@ -137,7 +204,7 @@ export function backfillVerifiedProvenanceEvidence(database: DatabaseConnection)
     const revisionId = safeText(row.revision_id);
     const outputModel = safeModel(row.output_model);
     const digest = safeDigest(row.model_digest);
-    const baseModel = safeModel(row.base_model);
+    const baseModel = safeLineageModelReference(row.base_model);
     const sourceJobId = safeText(row.source_create_job_id);
     const actorUserId = safeText(row.actor_user_id);
     const verifiedAt = safeText(row.verified_at, 80);
@@ -170,6 +237,7 @@ export function backfillVerifiedProvenanceEvidence(database: DatabaseConnection)
       toNodeId: installed.id,
       relation: 'base-model', origin: 'observed', confidence: 'high', sourceJobId, actorUserId, createdAt: verifiedAt,
     });
+    materializeAdapters(database, repository, installed, row.raw_text, `create:${sourceJobId}`, actorUserId, verifiedAt, sourceJobId);
     deploymentsProcessed += 1;
   }
 

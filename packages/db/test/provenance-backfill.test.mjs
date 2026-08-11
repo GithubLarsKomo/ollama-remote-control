@@ -19,8 +19,13 @@ function seeded() {
   database.prepare(`INSERT INTO modelfile_revisions(
     id, modelfile_id, revision_number, parent_revision_id, raw_text, content_sha256,
     source_kind, imported_target_id, imported_model, imported_digest, created_by_user_id, created_at
-  ) VALUES ('rev-1', 'mf-1', 1, NULL, 'FROM base:latest\n', ?, 'installed-model-import', 'target-1', 'base:latest', ?, 'user-1', ?)`)
-    .run(revisionHash, importedDigest, '2026-08-10T16:01:00.000Z');
+  ) VALUES ('rev-1', 'mf-1', 1, NULL, ?, ?, 'installed-model-import', 'target-1', 'base:latest', ?, 'user-1', ?)`)
+    .run(
+      'FROM base:latest\nADAPTER hf.co/example/adapter:Q4_K_M\nADAPTER /srv/local/adapter.gguf\n',
+      revisionHash,
+      importedDigest,
+      '2026-08-10T16:01:00.000Z',
+    );
   database.prepare(`INSERT INTO jobs(id, target_id, actor_user_id, kind, mutating, state, created_at, started_at, finished_at, result_json)
     VALUES ('job-create-1', 'target-1', 'user-1', 'model-create', 1, 'succeeded', ?, ?, ?, '{}')`)
     .run('2026-08-10T16:02:00.000Z', '2026-08-10T16:02:00.000Z', '2026-08-10T16:03:00.000Z');
@@ -32,23 +37,37 @@ function seeded() {
   return database;
 }
 
-test('backfill is idempotent and materializes import plus verified create evidence', () => {
+test('backfill is idempotent and materializes import, create and explicit adapter evidence', () => {
   const database = seeded();
   try {
     assert.deepEqual(backfillVerifiedProvenanceEvidence(database), { importsProcessed: 1, deploymentsProcessed: 1 });
     assert.deepEqual(backfillVerifiedProvenanceEvidence(database), { importsProcessed: 1, deploymentsProcessed: 1 });
 
-    assert.equal(database.prepare('SELECT COUNT(*) AS count FROM provenance_nodes').get().count, 4);
-    assert.equal(database.prepare('SELECT COUNT(*) AS count FROM provenance_edges').get().count, 3);
+    assert.equal(database.prepare('SELECT COUNT(*) AS count FROM provenance_nodes').get().count, 5);
+    assert.equal(database.prepare('SELECT COUNT(*) AS count FROM provenance_edges').get().count, 5);
 
     const created = readPersistedProvenanceGraph(database, { targetId: 'target-1', model: 'derived:latest', digest: deployedDigest });
     assert.notEqual(created.currentNodeId, null);
-    assert.deepEqual(created.edges.map((edge) => edge.relation).sort(), ['base-model', 'created-from-revision']);
+    assert.deepEqual(created.edges.map((edge) => edge.relation).sort(), ['adapter', 'base-model', 'created-from-revision']);
     assert.equal(created.nodes.some((node) => node.kind === 'modelfile-revision' && node.revisionId === 'rev-1'), true);
     assert.equal(created.nodes.some((node) => node.kind === 'model-reference' && node.modelName === 'base:latest'), true);
+    assert.equal(created.nodes.some((node) => node.kind === 'model-reference' && node.modelName === 'hf.co/example/adapter:Q4_K_M'), true);
+    assert.equal(created.nodes.some((node) => node.kind === 'model-reference' && node.modelName === '/srv/local/adapter.gguf'), false);
 
     const imported = readPersistedProvenanceGraph(database, { targetId: 'target-1', model: 'base:latest', digest: importedDigest });
-    assert.deepEqual(imported.edges.map((edge) => edge.relation), ['captured-as-revision']);
+    assert.deepEqual(imported.edges.map((edge) => edge.relation).sort(), ['adapter', 'captured-as-revision']);
+    assert.equal(imported.edges.find((edge) => edge.relation === 'adapter')?.origin, 'observed');
+    assert.equal(imported.edges.find((edge) => edge.relation === 'adapter')?.confidence, 'high');
+  } finally { database.close(); }
+});
+
+test('adapter backfill fails closed for malformed imported Modelfile evidence', () => {
+  const database = seeded();
+  try {
+    database.exec('DROP TRIGGER trg_modelfile_revisions_no_update');
+    database.prepare(`UPDATE modelfile_revisions SET raw_text = 'FROM base:latest\nADAPTER """unterminated\n' WHERE id = 'rev-1'`).run();
+    backfillVerifiedProvenanceEvidence(database);
+    assert.equal(database.prepare(`SELECT COUNT(*) AS count FROM provenance_edges WHERE relation = 'adapter'`).get().count, 0);
   } finally { database.close(); }
 });
 

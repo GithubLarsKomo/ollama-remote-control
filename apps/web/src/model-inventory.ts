@@ -257,6 +257,37 @@ export async function correctModelSource(
   return safeJsonError(response, 'HTTP_ERROR', `Provenance correction failed with HTTP ${response.status}.`);
 }
 
+export interface ProvenanceLineageRequest {
+  readonly relation: 'adapter' | 'quantized-from';
+  readonly parentModel: string;
+  readonly confidence: 'high' | 'medium' | 'low';
+}
+
+export interface RecordedProvenanceLineageView {
+  readonly parentNode: PersistedProvenanceNodeView;
+  readonly edge: PersistedProvenanceEdgeView;
+}
+
+export async function recordModelLineage(
+  nodeId: string,
+  input: ProvenanceLineageRequest,
+): Promise<RecordedProvenanceLineageView> {
+  const csrf = csrfTokenFromCookie(document.cookie);
+  if (!csrf) throw new ApiError(403, 'CSRF_MISSING', 'CSRF token is unavailable. Sign in again.');
+  const response = await fetch(`/api/v1/provenance/nodes/${encodeURIComponent(nodeId)}/lineage`, {
+    method: 'POST',
+    credentials: 'include',
+    headers: {
+      accept: 'application/json',
+      'content-type': 'application/json',
+      'x-csrf-token': csrf,
+    },
+    body: JSON.stringify(input),
+  });
+  if (response.ok) return await response.json() as RecordedProvenanceLineageView;
+  return safeJsonError(response, 'HTTP_ERROR', `Provenance lineage recording failed with HTTP ${response.status}.`);
+}
+
 export interface ModelInventorySummary {
   readonly installedCount: number;
   readonly installedBytes: number;
