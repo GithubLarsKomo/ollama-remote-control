@@ -3,7 +3,7 @@ import { describe, expect, it, vi } from 'vitest';
 import ModelCreatePanel from './ModelCreatePanel.js';
 
 describe('ModelCreatePanel', () => {
-  it('renders planning before confirmation and explains server-authoritative immutable deployment', () => {
+  it('renders separate create-new and replace/rebuild planning before confirmation', () => {
     const html = renderToStaticMarkup(
       <ModelCreatePanel
         disabled={false}
@@ -13,15 +13,14 @@ describe('ModelCreatePanel', () => {
       />,
     );
 
-    expect(html).toContain('Create model from Modelfile revision');
-    expect(html).toContain('Create fresh deploy plan');
+    expect(html).toContain('Create or replace model from Modelfile revision');
+    expect(html).toContain('Plan create new model');
+    expect(html).toContain('Plan replace/rebuild existing model');
     expect(html).toContain('Immutable revision');
     expect(html).toContain('Destination model');
-    expect(html).toContain('short-lived server-authoritative plan');
-    expect(html).toContain('/api/show');
-    expect(html).not.toContain('Confirm and create');
+    expect(html).toContain('exact installed destination digest');
+    expect(html).not.toContain('Confirm replace/rebuild');
     expect(html).not.toContain('confirmationToken');
-    expect(html).not.toContain('SYSTEM');
     expect(html).not.toContain('secret');
   });
 });
