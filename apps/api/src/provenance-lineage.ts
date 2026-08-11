@@ -1,4 +1,4 @@
-import { createHash, randomUUID } from 'node:crypto';
+import { createHash } from 'node:crypto';
 import type { ProvenanceConfidence, ProvenanceRelation, StoredProvenanceEdge, StoredProvenanceNode } from '@orc/core/provenance';
 import type { DatabaseConnection } from '@orc/db';
 import { SqliteProvenanceRepository } from '@orc/db/provenance';
@@ -122,8 +122,6 @@ export class ProvenanceLineageService {
 
     this.repository.appendEdge(edge);
     this.audit.record({
-      id: randomUUID(),
-      timestamp: createdAt,
       actorUserId: actor,
       targetId: installedRow.target_id === null ? null : String(installedRow.target_id),
       action: 'provenance.lineage.record',
