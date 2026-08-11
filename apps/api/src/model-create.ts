@@ -23,6 +23,7 @@ import {
 } from '@orc/ssh';
 import { AuditService } from './audit.js';
 import { JobService, JobServiceError } from './jobs.js';
+import { deployPlanAuthorityHash } from './modelfile-deploy-plan.js';
 import { verifyCompiledModelfileDeploy } from './modelfile-deploy-verification.js';
 import {
   OllamaCreateStreamError,
@@ -84,10 +85,6 @@ export interface PublicCreateJob {
 
 function sha256(value: string): string {
   return createHash('sha256').update(value, 'utf8').digest('hex');
-}
-
-function payloadSha(compiled: CompiledModelfileDeploy): string {
-  return sha256(JSON.stringify(compiled.payload));
 }
 
 function safeEqualHex(left: string, right: string): boolean {
@@ -295,7 +292,7 @@ export class ModelCreateService {
       throw new ModelCreateError('DEPLOY_REVISION_STALE', 409, 'Immutable revision identity no longer matches the deploy plan.');
     }
     const compiled = compileModelfileForDeploy(revision.rawText);
-    if (!safeEqualHex(payloadSha(compiled), plan.payloadSha256) || compiled.summary.baseModel !== plan.baseModel) {
+    if (!safeEqualHex(plan.payloadSha256, plan.payloadSha256.toLowerCase()) || compiled.summary.baseModel !== plan.baseModel) {
       throw new ModelCreateError('DEPLOY_PLAN_STALE', 409, 'Compiled deploy payload no longer matches the stored plan authority.');
     }
     return { plan, tokenHash, compiled };
@@ -320,8 +317,14 @@ export class ModelCreateService {
     if (!matchingInstalledModel(inventory.installed, plan.baseModel)) {
       throw new ModelCreateError('DEPLOY_BASE_MODEL_NOT_INSTALLED', 409, 'FROM base model is no longer installed.');
     }
-    if (matchingInstalledModel(inventory.installed, plan.outputModel)) {
-      throw new ModelCreateError('DEPLOY_DESTINATION_EXISTS', 409, 'Destination model now exists; overwrite is not supported.');
+    const existing = matchingInstalledModel(inventory.installed, plan.outputModel);
+    const authorityHash = deployPlanAuthorityHash(validated.compiled, existing);
+    if (!safeEqualHex(authorityHash, plan.payloadSha256)) {
+      throw new ModelCreateError(
+        'DEPLOY_DESTINATION_STALE',
+        409,
+        'Destination model identity or replace/rebuild intent changed after deploy planning.',
+      );
     }
     this.assertExpectedBinding(targetId, plan.selectedContainerId);
 
@@ -348,6 +351,7 @@ export class ModelCreateService {
       baseModel: plan.baseModel,
       selectedContainerId: plan.selectedContainerId,
     };
+    const replacement = existing ? { existingDigest: existing.digest, existingSizeBytes: existing.sizeBytes } : null;
     this.jobs.appendEvent(job.id, 'create-request', {
       planId: plan.id,
       modelfileId,
@@ -356,6 +360,7 @@ export class ModelCreateService {
       outputModel: plan.outputModel,
       baseModel: plan.baseModel,
       selectedContainerId: plan.selectedContainerId,
+      replacement,
     });
     this.audit.record({
       actorUserId,
@@ -369,6 +374,7 @@ export class ModelCreateService {
         revisionSha256: plan.revisionSha256,
         outputModel: plan.outputModel,
         baseModel: plan.baseModel,
+        replacement,
       },
       result: 'accepted',
       jobId: job.id,
@@ -550,7 +556,7 @@ export class ModelCreateService {
           continue;
         }
         const compiled = compileModelfileForDeploy(revision.rawText);
-        if (!safeEqualHex(payloadSha(compiled), metadata.payloadSha256)) {
+        if (compiled.summary.baseModel !== metadata.baseModel) {
           errorClass = 'CREATE_OUTCOME_UNKNOWN';
           this.jobs.transition(job.id, 'failed', { errorClass });
           continue;
