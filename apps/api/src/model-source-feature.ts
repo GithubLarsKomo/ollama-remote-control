@@ -7,6 +7,7 @@ import { resolveModelSourceReference } from '@orc/core/model-source';
 import {
   applyMigrations,
   openDatabase,
+  SqliteAuditRepository,
   SqliteAuthRepository,
   SqliteHostOnboardingRepository,
   SqliteOllamaTargetRepository,
@@ -20,12 +21,14 @@ import {
   loadConfiguredMasterKey,
   type MasterKeyEnvironment,
 } from '@orc/security';
+import { AuditService } from './audit.js';
 import {
   AuthError,
   AuthService,
   DEFAULT_SESSION_TTL_MS,
 } from './auth.js';
 import {
+  CSRF_COOKIE,
   parseCookies,
   SESSION_COOKIE,
 } from './cookies.js';
@@ -37,9 +40,15 @@ import {
   buildModelProvenanceGraph,
   SqliteModelProvenanceEvidenceStore,
 } from './model-provenance-graph.js';
+import {
+  ProvenanceSourceCorrectionError,
+  ProvenanceSourceCorrectionService,
+  type ProvenanceSourceCorrectionInput,
+} from './provenance-source-correction.js';
 
 interface TargetParams { readonly targetId: string; }
 interface ModelQuery { readonly model?: unknown; }
+interface ProvenanceNodeParams { readonly nodeId: string; }
 
 export interface RegisterModelSourceFeatureOptions {
   readonly databasePath: string;
@@ -48,8 +57,12 @@ export interface RegisterModelSourceFeatureOptions {
   readonly environment?: MasterKeyEnvironment;
 }
 
+function csrfHeader(value: string | string[] | undefined): string | undefined {
+  return Array.isArray(value) ? value[0] : value;
+}
+
 function sendFeatureError(reply: FastifyReply, error: unknown): FastifyReply {
-  if (error instanceof AuthError || error instanceof OllamaModelDetailError) {
+  if (error instanceof AuthError || error instanceof OllamaModelDetailError || error instanceof ProvenanceSourceCorrectionError) {
     return reply.code(error.statusCode).send({ error: { code: error.code, message: error.message } });
   }
   throw error;
@@ -79,10 +92,27 @@ export function registerModelSourceFeature(
     loadConfiguredMasterKey(options.environment ?? process.env),
   );
   const provenance = new SqliteModelProvenanceEvidenceStore(database);
+  const corrections = new ProvenanceSourceCorrectionService(
+    database,
+    new AuditService(new SqliteAuditRepository(database), now),
+    now,
+  );
 
   function requireAuthenticated(request: FastifyRequest) {
     const session = auth.getSession(parseCookies(request.headers.cookie)[SESSION_COOKIE]);
     if (!session) throw new AuthError('UNAUTHENTICATED', 401, 'Authentication is required.');
+    return session;
+  }
+
+  function requireAuthenticatedMutation(request: FastifyRequest) {
+    const cookies = parseCookies(request.headers.cookie);
+    const session = auth.getSession(cookies[SESSION_COOKIE]);
+    if (!session) throw new AuthError('UNAUTHENTICATED', 401, 'Authentication is required.');
+    const headerToken = csrfHeader(request.headers['x-csrf-token']);
+    if (!headerToken || cookies[CSRF_COOKIE] !== headerToken) {
+      throw new AuthError('CSRF_INVALID', 403, 'CSRF token is invalid.');
+    }
+    auth.assertCsrf(session, headerToken);
     return session;
   }
 
@@ -110,6 +140,19 @@ export function registerModelSourceFeature(
           graph: buildModelProvenanceGraph(provenance, graphInput),
           persistedGraph: readPersistedProvenanceGraph(database, graphInput),
         });
+      } catch (error) {
+        return sendFeatureError(reply, error);
+      }
+    },
+  );
+
+  app.post<{ Params: ProvenanceNodeParams; Body: ProvenanceSourceCorrectionInput }>(
+    '/api/v1/provenance/nodes/:nodeId/source-corrections',
+    async (request, reply) => {
+      try {
+        const session = requireAuthenticatedMutation(request);
+        const source = corrections.correct(session.userId, request.params.nodeId, request.body ?? {});
+        return reply.code(201).send({ source });
       } catch (error) {
         return sendFeatureError(reply, error);
       }
