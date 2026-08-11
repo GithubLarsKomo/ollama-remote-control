@@ -9,6 +9,9 @@ export interface StoredModelfileDeployPlan {
   readonly outputModel: string;
   readonly baseModel: string;
   readonly payloadSha256: string;
+  readonly replaceExisting: boolean;
+  readonly expectedExistingDigest: string | null;
+  readonly expectedExistingSizeBytes: number | null;
   readonly confirmationTokenHash: string;
   readonly createdAt: string;
   readonly expiresAt: string;
