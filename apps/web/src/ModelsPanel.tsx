@@ -9,7 +9,7 @@ import {
   type TargetStatusResult,
 } from './api.js';
 import { formatBytes, formatTimestamp } from './format.js';
-import LocalModelfilesPanel from './LocalModelfilesPanel.js';
+import LocalModelfilesWorkspace from './LocalModelfilesWorkspace.js';
 import ModelCreatePanel from './ModelCreatePanel.js';
 import ModelDetailsPanel from './ModelDetailsPanel.js';
 import ModelPullPanel from './ModelPullPanel.js';
@@ -313,7 +313,7 @@ export default function ModelsPanel({ status, disabled, onSignedOut }: ModelsPan
             </div>
           )}
 
-          <LocalModelfilesPanel
+          <LocalModelfilesWorkspace
             disabled={disabled || busy}
             inventory={inventory}
             onSignedOut={onSignedOut}
