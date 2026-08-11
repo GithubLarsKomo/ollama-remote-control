@@ -12,7 +12,7 @@ import type {
 import type { ModelfileRepository } from '@orc/core/modelfiles';
 import { AuditService } from './audit.js';
 import type { OllamaHealthResult } from './ollama-health.js';
-import type { OllamaModelInventoryResult } from './ollama-models.js';
+import type { InstalledOllamaModelView, OllamaModelInventoryResult } from './ollama-models.js';
 
 const PLAN_TTL_MS = 5 * 60_000;
 const MAX_MODEL_NAME = 512;
@@ -28,6 +28,10 @@ export interface ModelfileDeployPlanView {
   readonly revisionSha256: string;
   readonly outputModel: string;
   readonly baseModel: string;
+  readonly replacement: null | {
+    readonly existingDigest: string;
+    readonly existingSizeBytes: number;
+  };
   readonly apiVersion: string;
   readonly directiveCounts: Readonly<Record<string, number>>;
   readonly expectedFields: readonly string[];
@@ -37,6 +41,7 @@ export interface ModelfileDeployPlanView {
 
 export interface CreateModelfileDeployPlanInput {
   readonly outputModel?: unknown;
+  readonly replaceExisting?: unknown;
 }
 
 interface HealthReader {
@@ -78,6 +83,12 @@ function outputModel(value: unknown): string {
   return canonicalModelName(text);
 }
 
+function replacementIntent(value: unknown): boolean {
+  if (value === undefined || value === false) return false;
+  if (value === true) return true;
+  throw new ModelfileDeployPlanError('DEPLOY_REPLACE_INTENT_INVALID', 400, 'Replace/rebuild intent must be an explicit boolean.');
+}
+
 function publicCompileError(error: unknown): ModelfileDeployPlanError {
   if (error instanceof ModelfileDeployCompileError) {
     return new ModelfileDeployPlanError(error.code, 422, error.message);
@@ -95,17 +106,23 @@ function publicCompileError(error: unknown): ModelfileDeployPlanError {
   return new ModelfileDeployPlanError('MODEFILE_DEPLOY_PLAN_FAILED', 500, 'Modelfile deploy plan creation failed.');
 }
 
-function installedNames(inventory: OllamaModelInventoryResult): Set<string> {
-  const result = new Set<string>();
-  for (const model of inventory.installed) {
-    result.add(canonicalModelName(model.model));
-    result.add(canonicalModelName(model.name));
-  }
-  return result;
+function matchingInstalledModel(models: readonly InstalledOllamaModelView[], requested: string): InstalledOllamaModelView | null {
+  const canonical = canonicalModelName(requested);
+  return models.find((model) => (
+    canonicalModelName(model.model) === canonical || canonicalModelName(model.name) === canonical
+  )) ?? null;
 }
 
-function payloadHash(compiled: CompiledModelfileDeploy): string {
-  return sha256(JSON.stringify(compiled.payload));
+export function deployPlanAuthorityHash(
+  compiled: CompiledModelfileDeploy,
+  existing: Pick<InstalledOllamaModelView, 'digest' | 'sizeBytes'> | null,
+): string {
+  return sha256(JSON.stringify({
+    payload: compiled.payload,
+    destinationAuthority: existing
+      ? { mode: 'replace', digest: existing.digest.toLowerCase(), sizeBytes: existing.sizeBytes }
+      : { mode: 'create' },
+  }));
 }
 
 export class ModelfileDeployPlanService {
@@ -127,6 +144,7 @@ export class ModelfileDeployPlanService {
     input: CreateModelfileDeployPlanInput,
   ): Promise<ModelfileDeployPlanView> {
     const destination = outputModel(input.outputModel);
+    const replaceExisting = replacementIntent(input.replaceExisting);
     const artifact = this.modelfiles.findById(modelfileId);
     if (!artifact) throw new ModelfileDeployPlanError('MODEFILE_NOT_FOUND', 404, 'Local Modelfile was not found.');
     const revision = this.modelfiles.findRevisionById(revisionId);
@@ -154,12 +172,15 @@ export class ModelfileDeployPlanService {
         throw new ModelfileDeployPlanError('TARGET_BINDING_CHANGED', 409, 'Ollama target container binding changed during deploy planning.');
       }
 
-      const installed = installedNames(inventory);
-      if (!installed.has(compiled.summary.baseModel)) {
+      if (!matchingInstalledModel(inventory.installed, compiled.summary.baseModel)) {
         throw new ModelfileDeployPlanError('DEPLOY_BASE_MODEL_NOT_INSTALLED', 409, 'FROM base model is not installed on the selected target.');
       }
-      if (installed.has(destination)) {
-        throw new ModelfileDeployPlanError('DEPLOY_DESTINATION_EXISTS', 409, 'Destination model already exists; overwrite is not supported by this deploy mode.');
+      const existing = matchingInstalledModel(inventory.installed, destination);
+      if (existing && !replaceExisting) {
+        throw new ModelfileDeployPlanError('DEPLOY_DESTINATION_EXISTS', 409, 'Destination model already exists; request an explicit replace/rebuild plan to continue.');
+      }
+      if (!existing && replaceExisting) {
+        throw new ModelfileDeployPlanError('DEPLOY_REPLACE_TARGET_MISSING', 409, 'Replace/rebuild was requested but the destination model is not currently installed.');
       }
 
       const createdAt = this.now();
@@ -175,7 +196,7 @@ export class ModelfileDeployPlanService {
         selectedContainerId: after.selectedContainerId,
         outputModel: destination,
         baseModel: compiled.summary.baseModel,
-        payloadSha256: payloadHash(compiled),
+        payloadSha256: deployPlanAuthorityHash(compiled, existing),
         confirmationTokenHash: sha256(confirmationToken),
         createdAt: createdAt.toISOString(),
         expiresAt: expiresAt.toISOString(),
@@ -198,6 +219,10 @@ export class ModelfileDeployPlanService {
           outputModel: destination,
           baseModel: compiled.summary.baseModel,
           selectedContainerId: after.selectedContainerId,
+          replacement: existing ? {
+            existingDigest: existing.digest,
+            existingSizeBytes: existing.sizeBytes,
+          } : null,
           expectedFields: compiled.summary.expectedFields,
           directiveCounts: compiled.summary.directiveCounts,
           expiresAt: plan.expiresAt,
@@ -214,7 +239,11 @@ export class ModelfileDeployPlanService {
         revisionId: plan.revisionId,
         revisionSha256: plan.revisionSha256,
         outputModel: plan.outputModel,
-        baseModel: plan.baseModel,
+        baseModel: compiled.summary.baseModel,
+        replacement: existing ? {
+          existingDigest: existing.digest,
+          existingSizeBytes: existing.sizeBytes,
+        } : null,
         apiVersion: health.ollama.apiVersion,
         directiveCounts: compiled.summary.directiveCounts,
         expectedFields: compiled.summary.expectedFields,
