@@ -10,6 +10,7 @@ import {
   type ModelSourceView,
   type ProvenanceReferencePreview,
 } from './model-inventory.js';
+import ProvenanceLineagePanel from './ProvenanceLineagePanel.js';
 import ProvenanceSourceCorrectionPanel from './ProvenanceSourceCorrectionPanel.js';
 
 type DetailTab = 'overview' | 'modelfile' | 'runtime';
@@ -267,6 +268,24 @@ export default function ModelDetailsPanel({
               </section>
 
               {sources ? (
+                <ProvenanceLineagePanel
+                  disabled={disabled || sourceBusy}
+                  onRecorded={(recorded) => setSources((current) => current ? {
+                    ...current,
+                    persistedGraph: {
+                      ...current.persistedGraph,
+                      nodes: current.persistedGraph.nodes.some((node) => node.id === recorded.parentNode.id)
+                        ? current.persistedGraph.nodes
+                        : [...current.persistedGraph.nodes, recorded.parentNode],
+                      edges: [recorded.edge, ...current.persistedGraph.edges],
+                    },
+                  } : current)}
+                  onSignedOut={onSignedOut}
+                  sources={sources}
+                />
+              ) : null}
+
+              {sources ? (
                 <ProvenanceSourceCorrectionPanel
                   disabled={disabled || sourceBusy}
                   onCorrected={(created) => setSources((current) => current ? {
@@ -279,7 +298,7 @@ export default function ModelDetailsPanel({
               ) : null}
 
               <p className="model-provenance-note">
-                Source links are derived only from explicit server-observed references. Local provenance edges require matching target, canonical model identity and current digest. Local blob or file references are not treated as verified upstream lineage and never receive an external link. Operator source corrections are append-only and never rewrite prior evidence.
+                Source links are derived only from explicit server-observed references. Persisted lineage is exact-digest bound and marks origin/confidence explicitly. Local blob or file references are not treated as verified upstream lineage. Operator source corrections and lineage evidence are append-only and never rewrite observed history.
               </p>
             </div>
           ) : null}
