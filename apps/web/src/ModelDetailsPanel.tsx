@@ -10,6 +10,7 @@ import {
   type ModelSourceView,
   type ProvenanceReferencePreview,
 } from './model-inventory.js';
+import ProvenanceSourceCorrectionPanel from './ProvenanceSourceCorrectionPanel.js';
 
 type DetailTab = 'overview' | 'modelfile' | 'runtime';
 
@@ -265,8 +266,20 @@ export default function ModelDetailsPanel({
                 ) : null}
               </section>
 
+              {sources ? (
+                <ProvenanceSourceCorrectionPanel
+                  disabled={disabled || sourceBusy}
+                  onCorrected={(created) => setSources((current) => current ? {
+                    ...current,
+                    persistedSources: [created, ...current.persistedSources],
+                  } : current)}
+                  onSignedOut={onSignedOut}
+                  sources={sources}
+                />
+              ) : null}
+
               <p className="model-provenance-note">
-                Source links are derived only from explicit server-observed references. Local provenance edges require matching target, canonical model identity and current digest. Local blob or file references are not treated as verified upstream lineage and never receive an external link.
+                Source links are derived only from explicit server-observed references. Local provenance edges require matching target, canonical model identity and current digest. Local blob or file references are not treated as verified upstream lineage and never receive an external link. Operator source corrections are append-only and never rewrite prior evidence.
               </p>
             </div>
           ) : null}
