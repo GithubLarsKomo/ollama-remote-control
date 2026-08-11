@@ -4,6 +4,7 @@ import http from 'node:http';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
+import { openDatabase } from '@orc/db';
 import { registerModelSourceFeature } from '../dist/model-source-feature.js';
 import { buildServer } from '../dist/server.js';
 
@@ -72,6 +73,27 @@ async function onboard(app, cookies) {
   });
   assert.equal(selected.statusCode, 201);
   return selected.json().target.id;
+}
+
+function seedPersistedSource(databasePath, targetId) {
+  const database = openDatabase(databasePath);
+  try {
+    const user = database.prepare(`SELECT id FROM users WHERE username = 'admin'`).get();
+    database.prepare(`INSERT INTO provenance_nodes(
+      id, identity_key, kind, target_id, model_name, model_digest, revision_id, created_at
+    ) VALUES ('node-source-route', ?, 'installed-model', ?, ?, ?, NULL, ?)`)
+      .run(`installed:${targetId}:${MODEL}:${DIGEST}`, targetId, MODEL, DIGEST, '2026-08-11T12:00:00.000Z');
+    database.prepare(`INSERT INTO provenance_sources(
+      id, subject_kind, target_id, model_name, model_digest, revision_id,
+      source_kind, source_reference, origin, confidence, actor_user_id,
+      supersedes_source_id, note, created_at
+    ) VALUES ('source-route-1', 'installed-model', ?, ?, ?, NULL,
+      'huggingface', 'https://huggingface.co/unsloth/Qwen3.5-9B-GGUF', 'operator', 'high', ?,
+      NULL, 'confirmed source', '2026-08-11T12:05:00.000Z')`)
+      .run(targetId, MODEL, DIGEST, user.id);
+  } finally {
+    database.close();
+  }
 }
 
 async function readJsonRequest(request) {
@@ -150,6 +172,7 @@ test('source route resolves observed hf.co identity while refusing local generat
 
     const cookies = await authenticate(app);
     const targetId = await onboard(app, cookies);
+    seedPersistedSource(databasePath, targetId);
     fs.writeFileSync(DOCKER_FIXTURE_LOG, '');
     requests.length = 0;
 
@@ -194,6 +217,26 @@ test('source route resolves observed hf.co identity while refusing local generat
       currentNodeId: `installed:${DIGEST}`,
       nodes: [{ id: `installed:${DIGEST}`, kind: 'installed-model', model: MODEL, digest: DIGEST }],
       edges: [],
+    });
+    assert.equal(payload.persistedGraph.currentNodeId, 'node-source-route');
+    assert.equal(payload.persistedGraph.nodes.length, 1);
+    assert.equal(payload.persistedGraph.nodes[0].modelDigest, DIGEST);
+    assert.equal(payload.persistedSources.length, 1);
+    assert.deepEqual(payload.persistedSources[0], {
+      id: 'source-route-1',
+      subjectKind: 'installed-model',
+      targetId,
+      modelName: MODEL,
+      modelDigest: DIGEST,
+      revisionId: null,
+      sourceKind: 'huggingface',
+      sourceReference: 'https://huggingface.co/unsloth/Qwen3.5-9B-GGUF',
+      origin: 'operator',
+      confidence: 'high',
+      actorUserId: payload.persistedSources[0].actorUserId,
+      supersedesSourceId: null,
+      note: 'confirmed source',
+      createdAt: '2026-08-11T12:05:00.000Z',
     });
     assert.deepEqual(requests, [
       { method: 'GET', url: '/api/tags', body: null },
