@@ -13,7 +13,7 @@ const runningStatus = {
 } as unknown as TargetStatusResult;
 
 describe('ModelsPanel', () => {
-  it('exposes confirmed Modelfile deployment from the production models surface', () => {
+  it('exposes confirmed Modelfile create and replace planning from the production models surface', () => {
     const html = renderToStaticMarkup(
       <ModelsPanel
         disabled={false}
@@ -23,8 +23,9 @@ describe('ModelsPanel', () => {
     );
 
     expect(html).toContain('Models');
-    expect(html).toContain('Create model from Modelfile revision');
-    expect(html).toContain('Create fresh deploy plan');
+    expect(html).toContain('Create or replace model from Modelfile revision');
+    expect(html).toContain('Plan create new model');
+    expect(html).toContain('Plan replace/rebuild existing model');
     expect(html).toContain('Confirmed immutable deployment');
   });
 });
