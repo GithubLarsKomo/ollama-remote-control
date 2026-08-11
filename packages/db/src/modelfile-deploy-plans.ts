@@ -17,22 +17,12 @@ function mapPlan(row: Record<string, unknown> | undefined): StoredModelfileDeplo
     outputModel: String(row.output_model),
     baseModel: String(row.base_model),
     payloadSha256: String(row.payload_sha256),
-    replaceExisting: Number(row.replace_existing) === 1,
-    expectedExistingDigest: row.expected_existing_digest === null ? null : String(row.expected_existing_digest),
-    expectedExistingSizeBytes: row.expected_existing_size_bytes === null ? null : Number(row.expected_existing_size_bytes),
     confirmationTokenHash: String(row.confirmation_token_hash),
     createdAt: String(row.created_at),
     expiresAt: String(row.expires_at),
     consumedAt: row.consumed_at === null ? null : String(row.consumed_at),
   };
 }
-
-const PLAN_COLUMNS = `
-  id, target_id, modelfile_id, revision_id, revision_sha256,
-  actor_user_id, selected_container_id, output_model, base_model,
-  payload_sha256, replace_existing, expected_existing_digest, expected_existing_size_bytes,
-  confirmation_token_hash, created_at, expires_at, consumed_at
-`;
 
 export class SqliteModelfileDeployPlanRepository implements ModelfileDeployPlanRepository {
   constructor(private readonly database: DatabaseConnection) {}
@@ -42,9 +32,8 @@ export class SqliteModelfileDeployPlanRepository implements ModelfileDeployPlanR
       INSERT OR IGNORE INTO modelfile_deploy_plans(
         id, target_id, modelfile_id, revision_id, revision_sha256,
         actor_user_id, selected_container_id, output_model, base_model,
-        payload_sha256, replace_existing, expected_existing_digest, expected_existing_size_bytes,
-        confirmation_token_hash, created_at, expires_at, consumed_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL)
+        payload_sha256, confirmation_token_hash, created_at, expires_at, consumed_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL)
     `).run(
       plan.id,
       plan.targetId,
@@ -56,9 +45,6 @@ export class SqliteModelfileDeployPlanRepository implements ModelfileDeployPlanR
       plan.outputModel,
       plan.baseModel,
       plan.payloadSha256,
-      plan.replaceExisting ? 1 : 0,
-      plan.expectedExistingDigest,
-      plan.expectedExistingSizeBytes,
       plan.confirmationTokenHash,
       plan.createdAt,
       plan.expiresAt,
@@ -67,7 +53,9 @@ export class SqliteModelfileDeployPlanRepository implements ModelfileDeployPlanR
 
   findById(planId: string): StoredModelfileDeployPlan | null {
     return mapPlan(this.database.prepare(`
-      SELECT ${PLAN_COLUMNS}
+      SELECT id, target_id, modelfile_id, revision_id, revision_sha256,
+             actor_user_id, selected_container_id, output_model, base_model,
+             payload_sha256, confirmation_token_hash, created_at, expires_at, consumed_at
       FROM modelfile_deploy_plans
       WHERE id = ?
     `).get(planId));
@@ -83,7 +71,9 @@ export class SqliteModelfileDeployPlanRepository implements ModelfileDeployPlanR
     this.database.exec('BEGIN IMMEDIATE');
     try {
       const before = mapPlan(this.database.prepare(`
-        SELECT ${PLAN_COLUMNS}
+        SELECT id, target_id, modelfile_id, revision_id, revision_sha256,
+               actor_user_id, selected_container_id, output_model, base_model,
+               payload_sha256, confirmation_token_hash, created_at, expires_at, consumed_at
         FROM modelfile_deploy_plans
         WHERE id = ?
           AND actor_user_id = ?
