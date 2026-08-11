@@ -17,6 +17,7 @@ import {
   backfillVerifiedProvenanceEvidence,
   readPersistedProvenanceGraph,
 } from '@orc/db/provenance-backfill';
+import { SqliteProvenanceRepository } from '@orc/db/provenance';
 import {
   loadConfiguredMasterKey,
   type MasterKeyEnvironment,
@@ -92,6 +93,7 @@ export function registerModelSourceFeature(
     loadConfiguredMasterKey(options.environment ?? process.env),
   );
   const provenance = new SqliteModelProvenanceEvidenceStore(database);
+  const persistedProvenance = new SqliteProvenanceRepository(database);
   const corrections = new ProvenanceSourceCorrectionService(
     database,
     new AuditService(new SqliteAuditRepository(database), now),
@@ -139,6 +141,11 @@ export function registerModelSourceFeature(
           },
           graph: buildModelProvenanceGraph(provenance, graphInput),
           persistedGraph: readPersistedProvenanceGraph(database, graphInput),
+          persistedSources: persistedProvenance.listSourcesForInstalledModel(
+            graphInput.targetId,
+            graphInput.model,
+            graphInput.digest,
+          ),
         });
       } catch (error) {
         return sendFeatureError(reply, error);
