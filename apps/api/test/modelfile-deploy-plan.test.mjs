@@ -54,7 +54,7 @@ function inventory(models = ['base:latest']) {
   return {
     targetId: 'target-1', transport: { mode: 'published-binding' }, running: [],
     installed: models.map((model, index) => ({
-      name: model, model, modifiedAt: null, sizeBytes: 1,
+      name: model, model, modifiedAt: null, sizeBytes: index === 0 ? 1 : 2_048,
       digest: index === 0 ? BASE_DIGEST : String(index).padStart(64, 'c').slice(0, 64),
       details: { format: 'gguf', family: null, families: [], parameterSize: null, quantizationLevel: null },
     })),
@@ -112,6 +112,7 @@ test('creates a five-minute single-use authority without persisting sensitive Mo
   const view = await service.create('target-1', 'modelfile-1', 'revision-1', 'user-1', { outputModel: 'custom' });
   assert.equal(view.outputModel, 'custom:latest');
   assert.equal(view.baseModel, 'base:latest');
+  assert.equal(view.replacement, null);
   assert.equal(view.apiVersion, '0.12.0');
   assert.equal(view.expiresAt, '2026-08-10T00:05:00.000Z');
   assert.equal(view.confirmationToken.length > 30, true);
@@ -135,6 +136,26 @@ test('creates a five-minute single-use authority without persisting sensitive Mo
   assert.equal(auditText.includes('custom:latest'), true);
 });
 
+test('creates an explicit replacement authority bound to the observed destination digest and size', async () => {
+  const destinationInventory = inventory(['base:latest', 'custom:latest']);
+  const existing = destinationInventory.installed[1];
+  const { service, storedPlans, audits } = fixture({ inventory: destinationInventory });
+  const view = await service.create('target-1', 'modelfile-1', 'revision-1', 'user-1', {
+    outputModel: 'custom',
+    replaceExisting: true,
+  });
+
+  assert.deepEqual(view.replacement, {
+    existingDigest: existing.digest,
+    existingSizeBytes: existing.sizeBytes,
+  });
+  assert.equal(storedPlans.length, 1);
+  assert.equal(storedPlans[0].payloadSha256.length, 64);
+  const audit = JSON.parse(audits[0].parametersRedactedJson);
+  assert.equal(audit.replacement.existingDigest, existing.digest);
+  assert.equal(audit.replacement.existingSizeBytes, existing.sizeBytes);
+});
+
 test('rejects unsupported source before any remote read', async () => {
   const { service, counters } = fixture({ revision: revision('FROM ./model.gguf\n') });
   assert.equal(
@@ -144,7 +165,7 @@ test('rejects unsupported source before any remote read', async () => {
   assert.deepEqual(counters(), { targetReads: 0, healthReads: 0, inventoryReads: 0 });
 });
 
-test('requires healthy version parity, installed base, unused destination and stable container binding', async () => {
+test('requires healthy version parity, installed base, explicit replacement intent and stable container binding', async () => {
   assert.equal(
     await errorCode(fixture({ health: health(false) }).service.create('target-1', 'modelfile-1', 'revision-1', 'user-1', { outputModel: 'custom' })),
     'OLLAMA_VERSION_MISMATCH',
@@ -156,6 +177,10 @@ test('requires healthy version parity, installed base, unused destination and st
   assert.equal(
     await errorCode(fixture({ inventory: inventory(['base:latest', 'custom:latest']) }).service.create('target-1', 'modelfile-1', 'revision-1', 'user-1', { outputModel: 'custom' })),
     'DEPLOY_DESTINATION_EXISTS',
+  );
+  assert.equal(
+    await errorCode(fixture().service.create('target-1', 'modelfile-1', 'revision-1', 'user-1', { outputModel: 'custom', replaceExisting: true })),
+    'DEPLOY_REPLACE_TARGET_MISSING',
   );
   assert.equal(
     await errorCode(fixture({ rebind: true }).service.create('target-1', 'modelfile-1', 'revision-1', 'user-1', { outputModel: 'custom' })),
