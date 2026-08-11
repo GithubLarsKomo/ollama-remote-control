@@ -1,6 +1,7 @@
 import { createHash, randomUUID } from 'node:crypto';
 import type { ProvenanceConfidence, ProvenanceRelation, StoredProvenanceEdge, StoredProvenanceNode } from '@orc/core/provenance';
-import { SqliteProvenanceRepository, type DatabaseConnection } from '@orc/db';
+import type { DatabaseConnection } from '@orc/db';
+import { SqliteProvenanceRepository } from '@orc/db/provenance';
 import { AuditService } from './audit.js';
 
 const SAFE_MODEL = /^[A-Za-z0-9][A-Za-z0-9._/:@+-]*$/u;
