@@ -116,8 +116,9 @@ test('manual provenance correction is CSRF protected, node-bound, superseding an
       headers: { cookie: cookieHeader(cookies), 'x-csrf-token': cookies.orc_csrf },
     });
     assert.equal(corrected.statusCode, 201);
-    assert.equal(corrected.json().source.supersedesSourceId, first.id);
-    assert.equal(corrected.json().source.sourceReference, null);
+    const second = corrected.json().source;
+    assert.equal(second.supersedesSourceId, first.id);
+    assert.equal(second.sourceReference, null);
 
     const wrongKind = await app.inject({
       method: 'POST', url: '/api/v1/provenance/nodes/node-reference/source-corrections',
@@ -129,10 +130,14 @@ test('manual provenance correction is CSRF protected, node-bound, superseding an
 
     const database = openDatabase(databasePath);
     try {
-      const sources = database.prepare(`SELECT id, target_id, model_name, model_digest, supersedes_source_id FROM provenance_sources ORDER BY created_at, id`).all();
+      const sources = database.prepare(`SELECT id, target_id, model_name, model_digest, supersedes_source_id FROM provenance_sources ORDER BY id`).all();
       assert.equal(sources.length, 2);
-      assert.equal(sources[0].target_id, 'target-1');
-      assert.equal(sources[1].supersedes_source_id, first.id);
+      const firstStored = sources.find((source) => source.id === first.id);
+      const secondStored = sources.find((source) => source.id === second.id);
+      assert.ok(firstStored);
+      assert.ok(secondStored);
+      assert.equal(firstStored.target_id, 'target-1');
+      assert.equal(secondStored.supersedes_source_id, first.id);
 
       const audits = database.prepare(`SELECT actor_user_id, target_id, action, parameters_redacted_json FROM audit_events WHERE action = 'provenance.source.correct' ORDER BY timestamp, id`).all();
       assert.equal(audits.length, 2);
