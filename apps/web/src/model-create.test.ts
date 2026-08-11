@@ -1,15 +1,19 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createModelfileDeployPlan } from './model-create.js';
 
+const originalFetch = globalThis.fetch;
+type FetchCall = (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>;
+
 afterEach(() => {
+  globalThis.fetch = originalFetch;
+  vi.unstubAllGlobals();
   vi.restoreAllMocks();
-  document.cookie = 'csrf_token=; Max-Age=0; path=/';
 });
 
 describe('model-create deploy-plan client', () => {
   it('sends only output model and explicit replace intent, never browser-supplied destination evidence', async () => {
-    document.cookie = 'csrf_token=csrf-1; path=/';
-    const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response(JSON.stringify({
+    vi.stubGlobal('document', { cookie: 'orc_csrf=csrf-1' });
+    const fetchMock = vi.fn<FetchCall>(async () => new Response(JSON.stringify({
       plan: {
         planId: 'plan-1',
         confirmationToken: 'token',
@@ -28,10 +32,11 @@ describe('model-create deploy-plan client', () => {
         expiresAt: '2026-08-11T00:05:00.000Z',
       },
     }), { status: 201, headers: { 'content-type': 'application/json' } }));
+    globalThis.fetch = fetchMock as typeof fetch;
 
     await createModelfileDeployPlan('target-1', 'mf-1', 'rev-1', 'custom', true);
 
-    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(fetchMock).toHaveBeenCalledOnce();
     const [, init] = fetchMock.mock.calls[0]!;
     expect(JSON.parse(String(init?.body))).toEqual({ outputModel: 'custom', replaceExisting: true });
     expect(String(init?.body)).not.toContain('digest');
