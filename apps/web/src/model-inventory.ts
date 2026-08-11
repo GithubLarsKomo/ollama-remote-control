@@ -1,4 +1,4 @@
-import { ApiError } from './api.js';
+import { ApiError, csrfTokenFromCookie } from './api.js';
 
 export interface ModelDetailsView {
   readonly format: string | null;
@@ -81,6 +81,46 @@ export interface ModelProvenanceEdgeView {
   readonly jobId: string | null;
 }
 
+export interface PersistedProvenanceNodeView {
+  readonly id: string;
+  readonly identityKey: string;
+  readonly kind: 'installed-model' | 'model-reference' | 'modelfile-revision';
+  readonly targetId: string | null;
+  readonly modelName: string | null;
+  readonly modelDigest: string | null;
+  readonly revisionId: string | null;
+  readonly createdAt: string;
+}
+
+export interface PersistedProvenanceEdgeView {
+  readonly id: string;
+  readonly fromNodeId: string;
+  readonly toNodeId: string;
+  readonly relation: 'base-model' | 'adapter' | 'quantized-from' | 'created-from-revision' | 'captured-as-revision';
+  readonly origin: 'observed' | 'operator';
+  readonly confidence: 'high' | 'medium' | 'low' | 'unknown';
+  readonly sourceJobId: string | null;
+  readonly actorUserId: string;
+  readonly createdAt: string;
+}
+
+export interface PersistedProvenanceSourceView {
+  readonly id: string;
+  readonly subjectKind: 'installed-model' | 'modelfile-revision';
+  readonly targetId: string | null;
+  readonly modelName: string | null;
+  readonly modelDigest: string | null;
+  readonly revisionId: string | null;
+  readonly sourceKind: 'huggingface' | 'ollama' | 'url' | 'unknown';
+  readonly sourceReference: string | null;
+  readonly origin: 'observed' | 'operator';
+  readonly confidence: 'high' | 'medium' | 'low' | 'unknown';
+  readonly actorUserId: string;
+  readonly supersedesSourceId: string | null;
+  readonly note: string | null;
+  readonly createdAt: string;
+}
+
 export interface ModelSourceView {
   readonly targetId: string;
   readonly model: string;
@@ -94,6 +134,12 @@ export interface ModelSourceView {
     readonly nodes: readonly ModelProvenanceNodeView[];
     readonly edges: readonly ModelProvenanceEdgeView[];
   };
+  readonly persistedGraph: {
+    readonly currentNodeId: string | null;
+    readonly nodes: readonly PersistedProvenanceNodeView[];
+    readonly edges: readonly PersistedProvenanceEdgeView[];
+  };
+  readonly persistedSources: readonly PersistedProvenanceSourceView[];
 }
 
 export interface ModelDetailView {
@@ -181,6 +227,34 @@ export async function fetchModelSources(targetId: string, modelName: string): Pr
   );
   if (response.ok) return await response.json() as ModelSourceView;
   return safeJsonError(response, 'HTTP_ERROR', `Model source lookup failed with HTTP ${response.status}.`);
+}
+
+export interface ProvenanceSourceCorrectionRequest {
+  readonly sourceKind: 'huggingface' | 'ollama' | 'url' | 'unknown';
+  readonly sourceReference: string | null;
+  readonly confidence: 'high' | 'medium' | 'low' | 'unknown';
+  readonly note: string | null;
+  readonly supersedesSourceId: string | null;
+}
+
+export async function correctModelSource(
+  nodeId: string,
+  input: ProvenanceSourceCorrectionRequest,
+): Promise<PersistedProvenanceSourceView> {
+  const csrf = csrfTokenFromCookie(document.cookie);
+  if (!csrf) throw new ApiError(403, 'CSRF_MISSING', 'CSRF token is unavailable. Sign in again.');
+  const response = await fetch(`/api/v1/provenance/nodes/${encodeURIComponent(nodeId)}/source-corrections`, {
+    method: 'POST',
+    credentials: 'include',
+    headers: {
+      accept: 'application/json',
+      'content-type': 'application/json',
+      'x-csrf-token': csrf,
+    },
+    body: JSON.stringify(input),
+  });
+  if (response.ok) return (await response.json() as { readonly source: PersistedProvenanceSourceView }).source;
+  return safeJsonError(response, 'HTTP_ERROR', `Provenance correction failed with HTTP ${response.status}.`);
 }
 
 export interface ModelInventorySummary {
