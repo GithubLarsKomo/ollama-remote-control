@@ -3,7 +3,8 @@ import { ApiError } from './api.js';
 import { defaultImportedModelfileName, readRawModelfile } from './RawModelfileImportPanel.js';
 
 function file(bytes: Uint8Array, name = 'Example.Modelfile'): File {
-  return new File([bytes], name, { type: 'text/plain' });
+  const copy = Uint8Array.from(bytes);
+  return new File([copy.buffer], name, { type: 'text/plain' });
 }
 
 describe('raw Modelfile file import', () => {
