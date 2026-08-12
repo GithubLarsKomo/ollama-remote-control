@@ -1,0 +1,15 @@
+{
+  "schemaVersion": 1,
+  "overrides": {
+    "buildcheck@0.0.7": {
+      "license": "MIT",
+      "repository": "mscdex/buildcheck",
+      "commitSha": "98d046cecfa784ac5522f8491d9f46a907da6743",
+      "packageJsonPath": "package.json",
+      "packageJsonBlobSha": "bbb9c75f7dc481f566da726ce7ed9d2a0f120ea3",
+      "licensePath": "LICENSE",
+      "licenseBlobSha": "290762e94f4e2f2b52cc13ae4f2b63ac0269bfd1",
+      "reviewNote": "Exact upstream 0.0.7 release commit declares MIT in package.json and contains the matching MIT LICENSE text. Used only because npm lock metadata omits the license field."
+    }
+  }
+}
