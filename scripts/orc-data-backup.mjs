@@ -2,11 +2,12 @@
 import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import zlib from 'node:zlib';
 
 const FORMAT = 'orc-data-backup-v1';
 const MAX_FILES = 128;
-const MAX_TOTAL_BYTES = 512 * 1024 * 1024;
+const MAX_TOTAL_BYTES = 256 * 1024 * 1024;
 
 function fail(message) {
   const error = new Error(message);
@@ -32,8 +33,9 @@ function walk(root, current = '') {
     const stat = fs.lstatSync(absolute);
     if (stat.isSymbolicLink()) fail(`Symlinks are not allowed in application data backups: ${relative}`);
     if (stat.isDirectory()) files.push(...walk(root, relative));
-    else if (stat.isFile()) files.push({ relative, absolute, size: stat.size, mode: stat.mode & 0o777 });
+    else if (stat.isFile()) files.push({ relative, absolute, size: stat.size });
     else fail(`Unsupported application data entry: ${relative}`);
+    if (files.length > MAX_FILES) fail('Application data backup file count exceeds the allowed range.');
   }
   return files;
 }
@@ -57,7 +59,6 @@ export function createDataBackup(dataDirectory, outputFile) {
       const bytes = fs.readFileSync(entry.absolute);
       return {
         path: entry.relative,
-        mode: Math.min(entry.mode || 0o600, 0o700),
         size: bytes.length,
         sha256: sha256(bytes),
         contentBase64: bytes.toString('base64'),
@@ -95,6 +96,7 @@ export function restoreDataBackup(backupFile, destinationDirectory) {
   } else {
     fs.mkdirSync(destination, { recursive: true, mode: 0o700 });
   }
+  fs.chmodSync(destination, 0o700);
 
   let totalBytes = 0;
   const seen = new Set();
@@ -121,7 +123,7 @@ function usage() {
   process.exitCode = 64;
 }
 
-if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(new URL(import.meta.url).pathname)) {
+if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToPath(import.meta.url))) {
   const [operation, first, second] = process.argv.slice(2);
   try {
     if (operation === 'create' && first && second) console.log(JSON.stringify(createDataBackup(first, second)));
