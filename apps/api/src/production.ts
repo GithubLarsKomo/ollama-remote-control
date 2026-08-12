@@ -9,6 +9,7 @@ import { registerModelfileDeploymentFeature } from './modelfile-deployment-featu
 import { registerModelfilePortabilityFeature } from './modelfile-portability-feature.js';
 import { registerModelfileValidationFeature } from './modelfile-validation-feature.js';
 import { buildServer } from './server.js';
+import { registerShortMutationReconciliationFeature } from './short-mutation-reconciliation-feature.js';
 import { registerWebAssets } from './web-assets.js';
 
 export function buildProductionServer(environment: NodeJS.ProcessEnv = process.env) {
@@ -48,6 +49,11 @@ export function buildProductionServer(environment: NodeJS.ProcessEnv = process.e
   });
   registerModelfileValidationFeature(app, {
     databasePath,
+  });
+  // Register last so long-running reconcilers get first ownership of their job kinds.
+  registerShortMutationReconciliationFeature(app, {
+    databasePath,
+    environment,
   });
   registerWebAssets(app, environment.ORC_WEB_DIST_PATH ?? null);
   return app;

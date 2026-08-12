@@ -222,9 +222,12 @@ test('start, stop and restart execute typed argv, verify state, and persist term
     assert.equal(restart.json().container.running, true);
 
     assert.deepEqual(readDockerCalls(), [
+      'inspect ollama-container-id',
       'start ollama-container-id',
       'inspect ollama-container-id',
+      'inspect ollama-container-id',
       'stop ollama-container-id',
+      'inspect ollama-container-id',
       'inspect ollama-container-id',
       'restart ollama-container-id',
       'inspect ollama-container-id',
@@ -279,6 +282,7 @@ test('persistent target lock rejects a second lifecycle mutation while the first
     assert.equal(first.statusCode, 200);
     assert.equal(first.json().job.state, 'succeeded');
     assert.deepEqual(readDockerCalls(), [
+      'inspect ollama-container-id',
       'restart ollama-container-id',
       'inspect ollama-container-id',
     ]);

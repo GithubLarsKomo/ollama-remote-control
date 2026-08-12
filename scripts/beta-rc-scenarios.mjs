@@ -68,6 +68,14 @@ export const betaRcScenarios = Object.freeze([
     ],
   },
   {
+    id: 'mutation-failure-recovery-matrix',
+    command: process.execPath,
+    args: ['--test', '--test-concurrency=1',
+      'apps/api/test/beta-failure-recovery-matrix.test.mjs',
+      'apps/api/test/short-mutation-reconciliation.test.mjs',
+    ],
+  },
+  {
     id: 'application-state-backup-restore',
     command: process.execPath,
     args: ['--test', '--test-concurrency=1',

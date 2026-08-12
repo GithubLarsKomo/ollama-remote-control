@@ -24,6 +24,7 @@ test('beta RC scenario manifest is bounded, unique and includes amended beta pat
     'modelfile-deploy-lineage',
     'container-audit-safety',
     'restart-update-rollback',
+    'mutation-failure-recovery-matrix',
     'application-state-backup-restore',
     'browser-reconnect-surfaces',
   ]) assert.ok(ids.includes(expected));
