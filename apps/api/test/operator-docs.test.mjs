@@ -66,5 +66,5 @@ test('operator docs link the bounded recovery and release evidence', () => {
 
   const backup = text('docs/BACKUP-RESTORE.md');
   assert.match(backup, /The app must be stopped before backup/i);
-  assert.match(backup, /master key.*separately/i);
+  assert.match(backup, /must be backed up and escrowed separately/i);
 });
