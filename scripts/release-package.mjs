@@ -3,14 +3,19 @@ import { execFileSync } from 'node:child_process';
 import { cpSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { basename, join, resolve } from 'node:path';
 import process from 'node:process';
+import { buildThirdPartyLicenseInventory } from './third-party-license-inventory.mjs';
 
 const ROOT = resolve(import.meta.dirname, '..');
 const SHA256 = /^[a-f0-9]{40}$/u;
 const IMAGE_ID = /^sha256:[a-f0-9]{64}$/u;
 const RELEASE_VERSION = /^0\.1\.0-beta\.[1-9][0-9]*$/u;
 
+function sha256(value) {
+  return createHash('sha256').update(value).digest('hex');
+}
+
 function sha256File(path) {
-  return createHash('sha256').update(readFileSync(path)).digest('hex');
+  return sha256(readFileSync(path));
 }
 
 function readJson(path) {
@@ -90,6 +95,7 @@ export function buildReleaseManifest(input) {
   if (rootPackage.private !== true || lock.packages?.['']?.name !== rootPackage.name || lock.packages?.['']?.version !== rootPackage.version) {
     fail('Root package metadata does not match package-lock.json.');
   }
+  if (rootPackage.packageManager !== `npm@${release.npmVersion}`) fail('Root packageManager does not match release npmVersion.');
   const workspaces = workspaceRecords(lock);
   assertInternalDependencyLock(workspaces);
 
@@ -131,20 +137,44 @@ export function buildReleaseManifest(input) {
 
 export function writeReleaseBundle(input) {
   assertCleanRepository();
-  const manifest = buildReleaseManifest(input);
+  const lockText = readFileSync(join(ROOT, 'package-lock.json'), 'utf8');
+  const evidenceText = readFileSync(join(ROOT, 'release', 'third-party-license-evidence.json'), 'utf8');
+  const licenseInventory = buildThirdPartyLicenseInventory(lockText, evidenceText);
+  const licenseContent = `${JSON.stringify(licenseInventory, null, 2)}\n`;
+  const manifest = {
+    ...buildReleaseManifest(input),
+    thirdPartyLicenses: {
+      packageCount: licenseInventory.packageCount,
+      licenseExpressionCounts: licenseInventory.licenseExpressionCounts,
+      reviewedEvidenceCount: licenseInventory.reviewedEvidenceCount,
+      reviewedEvidenceSha256: licenseInventory.reviewedEvidenceSha256,
+      inventorySha256: sha256(licenseContent),
+    },
+  };
+  if (manifest.inputs.packageLockSha256 !== licenseInventory.packageLockSha256) {
+    fail('Third-party license inventory is not bound to the release package-lock hash.');
+  }
+  if (manifest.thirdPartyLicenses.reviewedEvidenceSha256 !== sha256(evidenceText)) {
+    fail('Third-party license inventory is not bound to the reviewed evidence file.');
+  }
+
   const outDir = resolve(input.outDir);
   mkdirSync(outDir, { recursive: true });
 
   const manifestPath = join(outDir, 'release-manifest.json');
+  const licensePath = join(outDir, 'third-party-licenses.json');
+  const evidencePath = join(outDir, 'third-party-license-evidence.json');
   const dockerfilePath = join(outDir, 'Dockerfile');
   const composePath = join(outDir, 'compose.yaml');
   const versionPath = join(outDir, 'version.json');
   writeFileSync(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`, { mode: 0o644 });
+  writeFileSync(licensePath, licenseContent, { mode: 0o644 });
+  writeFileSync(evidencePath, evidenceText, { mode: 0o644 });
   cpSync(join(ROOT, 'Dockerfile'), dockerfilePath);
   cpSync(join(ROOT, 'compose.yaml'), composePath);
   cpSync(join(ROOT, 'release', 'version.json'), versionPath);
 
-  const checksumTargets = [manifestPath, dockerfilePath, composePath, versionPath];
+  const checksumTargets = [manifestPath, licensePath, evidencePath, dockerfilePath, composePath, versionPath];
   const sums = checksumTargets
     .map((path) => `${sha256File(path)}  ${basename(path)}`)
     .sort()
@@ -166,7 +196,7 @@ function main() {
     baseImageReference: args['base-image-reference'],
     baseImageId: args['base-image-id'],
   });
-  process.stdout.write(`${JSON.stringify({ releaseVersion: manifest.releaseVersion, commitSha: manifest.commitSha, imageId: manifest.image.id })}\n`);
+  process.stdout.write(`${JSON.stringify({ releaseVersion: manifest.releaseVersion, commitSha: manifest.commitSha, imageId: manifest.image.id, thirdPartyPackageCount: manifest.thirdPartyLicenses.packageCount, reviewedEvidenceCount: manifest.thirdPartyLicenses.reviewedEvidenceCount })}\n`);
 }
 
 if (process.argv[1] && resolve(process.argv[1]) === resolve(import.meta.filename)) main();
