@@ -22,6 +22,10 @@ import {
   type SshPrivateKeyConnection,
 } from '@orc/ssh';
 import { AuditService } from './audit.js';
+import {
+  parseDeployConfirmationToken,
+  type DeployConfirmationAuthority,
+} from './deploy-confirmation-authority.js';
 import { JobService, JobServiceError } from './jobs.js';
 import { verifyCompiledModelfileDeploy } from './modelfile-deploy-verification.js';
 import {
@@ -34,7 +38,7 @@ import type { OllamaModelDetailService } from './ollama-model-details.js';
 import type { InstalledOllamaModelView, OllamaModelInventoryService } from './ollama-models.js';
 
 const PROGRESS_MIN_INTERVAL_MS = 1_000;
-const TOKEN_MAX_LENGTH = 256;
+const TOKEN_MAX_LENGTH = 1024;
 const PLAN_ID_MAX_LENGTH = 128;
 
 export class ModelCreateError extends Error {
@@ -69,6 +73,9 @@ interface RunningMetadata {
   readonly outputModel: string;
   readonly baseModel: string;
   readonly selectedContainerId: string;
+  readonly replaceExisting: boolean;
+  readonly existingDestinationDigest: string | null;
+  readonly existingDestinationSizeBytes: number | null;
 }
 
 export interface PublicCreateJob {
@@ -146,6 +153,10 @@ function publicJob(job: StoredJob): PublicCreateJob {
   };
 }
 
+function legacyCreateAuthority(): DeployConfirmationAuthority {
+  return { replaceExisting: false, existingDestinationDigest: null, existingDestinationSizeBytes: null };
+}
+
 function runningMetadata(job: StoredJob): RunningMetadata | null {
   if (!job.resultJson) return null;
   try {
@@ -153,6 +164,13 @@ function runningMetadata(job: StoredJob): RunningMetadata | null {
     const selectedContainerId = normalizedContainerId(parsed.selectedContainerId);
     const outputModel = typeof parsed.outputModel === 'string' ? canonicalOllamaModelName(parsed.outputModel) : null;
     const baseModel = typeof parsed.baseModel === 'string' ? canonicalOllamaModelName(parsed.baseModel) : null;
+    const replaceExisting = parsed.replaceExisting === true;
+    const existingDestinationDigest = replaceExisting && typeof parsed.existingDestinationDigest === 'string'
+      ? parsed.existingDestinationDigest.toLowerCase()
+      : null;
+    const existingDestinationSizeBytes = replaceExisting && typeof parsed.existingDestinationSizeBytes === 'number'
+      ? parsed.existingDestinationSizeBytes
+      : null;
     if (
       typeof parsed.planId !== 'string'
       || typeof parsed.modelfileId !== 'string'
@@ -164,6 +182,7 @@ function runningMetadata(job: StoredJob): RunningMetadata | null {
       || !selectedContainerId
       || !outputModel
       || !baseModel
+      || (replaceExisting && (!existingDestinationDigest || !safeEqualHex(existingDestinationDigest, existingDestinationDigest) || !Number.isSafeInteger(existingDestinationSizeBytes) || (existingDestinationSizeBytes ?? -1) < 0))
     ) return null;
     return {
       planId: parsed.planId,
@@ -174,6 +193,9 @@ function runningMetadata(job: StoredJob): RunningMetadata | null {
       outputModel,
       baseModel,
       selectedContainerId,
+      replaceExisting,
+      existingDestinationDigest,
+      existingDestinationSizeBytes,
     };
   } catch {
     return null;
@@ -273,7 +295,7 @@ export class ModelCreateService {
     actorUserId: string,
     planValue: unknown,
     tokenValue: unknown,
-  ): { plan: StoredModelfileDeployPlan; tokenHash: string; compiled: CompiledModelfileDeploy } {
+  ): { plan: StoredModelfileDeployPlan; tokenHash: string; compiled: CompiledModelfileDeploy; authority: DeployConfirmationAuthority } {
     const id = planId(planValue);
     const token = confirmationToken(tokenValue);
     const plan = this.plans.findById(id);
@@ -290,6 +312,7 @@ export class ModelCreateService {
     if (!safeEqualHex(tokenHash, plan.confirmationTokenHash)) {
       throw new ModelCreateError('DEPLOY_CONFIRMATION_INVALID', 403, 'Deploy confirmation token does not match this plan.');
     }
+    const authority = parseDeployConfirmationToken(token) ?? legacyCreateAuthority();
     const revision = this.modelfiles.findRevisionById(revisionId);
     if (!revision || revision.modelfileId !== modelfileId || revision.contentSha256 !== plan.revisionSha256) {
       throw new ModelCreateError('DEPLOY_REVISION_STALE', 409, 'Immutable revision identity no longer matches the deploy plan.');
@@ -298,7 +321,7 @@ export class ModelCreateService {
     if (!safeEqualHex(payloadSha(compiled), plan.payloadSha256) || compiled.summary.baseModel !== plan.baseModel) {
       throw new ModelCreateError('DEPLOY_PLAN_STALE', 409, 'Compiled deploy payload no longer matches the stored plan authority.');
     }
-    return { plan, tokenHash, compiled };
+    return { plan, tokenHash, compiled, authority };
   }
 
   async start(
@@ -312,6 +335,7 @@ export class ModelCreateService {
     if (this.shuttingDown) throw new ModelCreateError('SERVER_SHUTTING_DOWN', 503, 'Model create service is shutting down.');
     const validated = this.validatePlanLocal(targetId, modelfileId, revisionId, actorUserId, planValue, tokenValue);
     const plan = validated.plan;
+    const authority = validated.authority;
     const local = this.assertExpectedBinding(targetId, plan.selectedContainerId);
 
     const health = await this.health.read(targetId);
@@ -320,8 +344,17 @@ export class ModelCreateService {
     if (!matchingInstalledModel(inventory.installed, plan.baseModel)) {
       throw new ModelCreateError('DEPLOY_BASE_MODEL_NOT_INSTALLED', 409, 'FROM base model is no longer installed.');
     }
-    if (matchingInstalledModel(inventory.installed, plan.outputModel)) {
-      throw new ModelCreateError('DEPLOY_DESTINATION_EXISTS', 409, 'Destination model now exists; overwrite is not supported.');
+    const destination = matchingInstalledModel(inventory.installed, plan.outputModel);
+    if (authority.replaceExisting) {
+      if (!destination) throw new ModelCreateError('DEPLOY_REPLACEMENT_TARGET_MISSING', 409, 'Replacement destination is no longer installed.');
+      if (
+        destination.digest !== authority.existingDestinationDigest
+        || destination.sizeBytes !== authority.existingDestinationSizeBytes
+      ) {
+        throw new ModelCreateError('DEPLOY_REPLACEMENT_TARGET_STALE', 409, 'Replacement destination identity changed after deploy planning.');
+      }
+    } else if (destination) {
+      throw new ModelCreateError('DEPLOY_DESTINATION_EXISTS', 409, 'Destination model now exists; explicit replacement planning is required.');
     }
     this.assertExpectedBinding(targetId, plan.selectedContainerId);
 
@@ -347,6 +380,9 @@ export class ModelCreateService {
       outputModel: plan.outputModel,
       baseModel: plan.baseModel,
       selectedContainerId: plan.selectedContainerId,
+      replaceExisting: authority.replaceExisting,
+      existingDestinationDigest: authority.existingDestinationDigest,
+      existingDestinationSizeBytes: authority.existingDestinationSizeBytes,
     };
     this.jobs.appendEvent(job.id, 'create-request', {
       planId: plan.id,
@@ -356,6 +392,9 @@ export class ModelCreateService {
       outputModel: plan.outputModel,
       baseModel: plan.baseModel,
       selectedContainerId: plan.selectedContainerId,
+      operation: authority.replaceExisting ? 'replace' : 'create',
+      existingDestinationDigest: authority.existingDestinationDigest,
+      existingDestinationSizeBytes: authority.existingDestinationSizeBytes,
     });
     this.audit.record({
       actorUserId,
@@ -369,6 +408,9 @@ export class ModelCreateService {
         revisionSha256: plan.revisionSha256,
         outputModel: plan.outputModel,
         baseModel: plan.baseModel,
+        operation: authority.replaceExisting ? 'replace' : 'create',
+        existingDestinationDigest: authority.existingDestinationDigest,
+        existingDestinationSizeBytes: authority.existingDestinationSizeBytes,
       },
       result: 'accepted',
       jobId: job.id,
@@ -668,6 +710,9 @@ export class ModelCreateService {
         revisionSha256: metadata.revisionSha256,
         outputModel: metadata.outputModel,
         baseModel: metadata.baseModel,
+        operation: metadata.replaceExisting ? 'replace' : 'create',
+        existingDestinationDigest: metadata.existingDestinationDigest,
+        existingDestinationSizeBytes: metadata.existingDestinationSizeBytes,
         mismatches,
       } : { mismatches },
       result,
