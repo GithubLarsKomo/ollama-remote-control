@@ -23,8 +23,9 @@ describe('ModelsPanel', () => {
     );
 
     expect(html).toContain('Models');
-    expect(html).toContain('Create model from Modelfile revision');
+    expect(html).toContain('Create or rebuild model from Modelfile revision');
     expect(html).toContain('Create fresh deploy plan');
+    expect(html).toContain('Replace / rebuild existing model');
     expect(html).toContain('Confirmed immutable deployment');
   });
 });
