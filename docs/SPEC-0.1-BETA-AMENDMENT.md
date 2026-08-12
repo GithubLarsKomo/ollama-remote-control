@@ -67,3 +67,19 @@ The amendment intentionally avoids expanding two high-risk authority surfaces im
 2. destructive model deletion.
 
 The product remains useful as a deterministic administration GUI while preserving the existing principles: pinned SSH trust, encrypted credentials, server-side typed operations, private Ollama connectivity, persistent mutation locks, auditability and explicit human confirmation for consequential supported actions.
+
+## 6. Standalone container update execution deferred from 0.1 beta
+
+For the 0.1 beta, the standalone-container execution portion of SPEC §§22, 37, 39 and 42 is narrowed to **read-only reconstructability analysis with fail-closed execution**. Managed update and rollback execution is supported only when the server positively validates the target as the existing Docker Compose strategy.
+
+Accordingly:
+
+- standalone Ollama targets remain supported for normal non-update administration;
+- update preflight may inspect and summarize a standalone container's reconstructability;
+- the application must not create an update execution intent for a standalone strategy;
+- the application must not stop, remove, recreate or partially reconstruct a standalone container as part of 0.1-beta update execution;
+- unsupported or high-impact runtime fields remain explicit blockers and must never be silently dropped;
+- Compose update, digest pinning, health verification, automatic rollback, manual rollback and restart reconciliation remain mandatory and unchanged;
+- the UI must identify standalone update execution as unsupported in 0.1 beta rather than imply that a blocked plan can be executed.
+
+This is a temporary beta risk boundary, not permanent roadmap removal. A post-beta standalone execution adapter requires separate review, reconstruction parity for supported runtime configuration, failure-injection coverage and verified rollback before it can become executable.

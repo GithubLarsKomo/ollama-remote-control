@@ -25,6 +25,12 @@ export default function UpdatePanel({ target, onBusyChange, onSignedOut, onUpdat
 
   return (
     <>
+      <section className="update-panel" aria-label="0.1 beta update scope">
+        <div className="update-warning" role="note">
+          <strong>0.1 beta update boundary</strong>
+          <p>Managed update execution is limited to a server-validated Docker Compose target. Standalone container updates are intentionally unsupported and fail closed in 0.1 beta.</p>
+        </div>
+      </section>
       {!rollbackBusy ? (
         <ContainerUpdatePanel
           onBusyChange={setUpdateBusy}
