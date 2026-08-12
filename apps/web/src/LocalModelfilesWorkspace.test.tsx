@@ -8,12 +8,14 @@ const status = { target: { id: 'target-1' } } as unknown as TargetStatusResult;
 const inventory = { installed: [], running: [] } as unknown as ModelInventoryView;
 
 describe('LocalModelfilesWorkspace', () => {
-  it('exposes local file import next to the immutable Modelfile library', () => {
+  it('exposes import, evidence-backed library state and the immutable editor from the Modelfiles surface', () => {
     const html = renderToStaticMarkup(
       <LocalModelfilesWorkspace disabled={false} inventory={inventory} onSignedOut={vi.fn()} status={status} />,
     );
     expect(html).toContain('Import raw Modelfile');
     expect(html).toContain('type="file"');
+    expect(html).toContain('Modelfile library state');
+    expect(html).toContain('Only persisted revision, validation and verified deployment evidence is shown');
     expect(html).toContain('Local Modelfiles');
   });
 });
