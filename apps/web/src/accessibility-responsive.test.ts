@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
-import accessibilityCss from './accessibility-responsive.css?raw';
-import baseCss from './styles.css?raw';
-import updateCss from './update.css?raw';
+import accessibilityCss from './accessibility-responsive.css?inline';
+import baseCss from './styles.css?inline';
+import updateCss from './update.css?inline';
 
 describe('bounded beta accessibility and responsive styles', () => {
   it('keeps keyboard focus visible across native and custom controls', () => {
