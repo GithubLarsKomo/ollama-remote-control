@@ -53,6 +53,28 @@ test('production image accepts immutable base and exposes non-sensitive release 
   assert.ok(dockerfile.includes('/app/release/version.json'));
 });
 
+test('beta release candidate fails closed through locked exact-SHA packaging', () => {
+  const workflow = text('.github/workflows/beta-release-candidate.yml');
+  for (const marker of [
+    'Resolve authoritative release metadata',
+    'Set up exact release Node',
+    'npm ci --ignore-scripts=false',
+    "base_tag='node:24-bookworm-slim'",
+    '--build-arg "NODE_IMAGE=${base_ref}"',
+    '--build-arg "ORC_VERSION=${RELEASE_VERSION}"',
+    '--build-arg "ORC_COMMIT_SHA=${TESTED_SHA}"',
+    'npm run release:package --',
+    'sha256sum -c SHA256SUMS',
+    'release-packaging=passed',
+    'Upload exact-SHA release package evidence',
+  ]) {
+    assert.ok(workflow.includes(marker), `beta RC workflow missing ${marker}`);
+  }
+  assert.ok(workflow.includes('beta-release-candidate'));
+  assert.ok(workflow.includes('foundation-spike'));
+  assert.ok(workflow.includes('production-container'));
+});
+
 test('release documentation keeps package evidence bounded and separate from public release', () => {
   const docs = text('docs/RELEASE-PACKAGING.md');
   assert.match(docs, /exact tested Git SHA/i);
