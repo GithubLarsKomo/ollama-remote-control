@@ -50,7 +50,7 @@ test('release packaging binds exact source, lock, workspaces, Docker and third-p
 test('reviewed missing-lock license evidence is exact-version and immutable-source bound', () => {
   const evidence = json('release/third-party-license-evidence.json');
   assert.equal(evidence.schemaVersion, 1);
-  assert.deepEqual(Object.keys(evidence.overrides), ['buildcheck@0.0.7']);
+  assert.deepEqual(Object.keys(evidence.overrides), ['buildcheck@0.0.7', 'cpu-features@0.0.10']);
   assert.deepEqual(evidence.overrides['buildcheck@0.0.7'], {
     license: 'MIT',
     repository: 'mscdex/buildcheck',
@@ -60,6 +60,16 @@ test('reviewed missing-lock license evidence is exact-version and immutable-sour
     licensePath: 'LICENSE',
     licenseBlobSha: '290762e94f4e2f2b52cc13ae4f2b63ac0269bfd1',
     reviewNote: 'Exact upstream 0.0.7 release commit declares MIT in package.json and contains the matching MIT LICENSE text. Used only because npm lock metadata omits the license field.',
+  });
+  assert.deepEqual(evidence.overrides['cpu-features@0.0.10'], {
+    license: 'MIT',
+    repository: 'mscdex/cpu-features',
+    commitSha: '3fc76509be992e460878aad775ffbde5cfe1da36',
+    packageJsonPath: 'package.json',
+    packageJsonBlobSha: '6cc12c3c7703ea17995be61c5accc331e7e35014',
+    licensePath: 'LICENSE',
+    licenseBlobSha: '9ea90e03922d5e31b32e5ff84f4e51a6ca0760b5',
+    reviewNote: 'Exact upstream 0.0.10 release commit declares MIT in package.json and contains the matching MIT LICENSE text. Used only because npm lock metadata omits the license field.',
   });
 });
 
