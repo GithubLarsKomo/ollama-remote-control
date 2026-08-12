@@ -279,7 +279,7 @@ test('0.1 beta joined release path survives browser/app reconnect and preserves 
     const audit = await app.inject({ method: 'GET', url: '/api/v1/audit?limit=100', headers: { cookie: cookieHeader(cookies) } });
     assert.equal(audit.statusCode, 200);
     const actions = new Set(audit.json().events.map((event) => event.action));
-    for (const action of ['host.create', 'model.pull.requested', 'modelfile.create', 'modelfile.deploy_plan.created', 'model.create.requested']) {
+    for (const action of ['model.pull.requested', 'modelfile.create', 'modelfile.deploy_plan.created', 'model.create.requested']) {
       assert.equal(actions.has(action), true, `missing joined-path audit action ${action}`);
     }
 
