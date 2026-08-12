@@ -20,6 +20,7 @@ RUN npm ci --ignore-scripts=false
 
 COPY apps ./apps
 COPY packages ./packages
+COPY scripts ./scripts
 
 RUN npm run build \
     && npm prune --omit=dev --ignore-scripts=false \
@@ -40,6 +41,7 @@ RUN mkdir -p /data \
 
 COPY --from=build --chown=node:node /app/node_modules ./node_modules
 COPY --from=build --chown=node:node /app/package.json /app/package-lock.json ./
+COPY --from=build --chown=node:node /app/scripts/orc-data-backup.mjs ./scripts/orc-data-backup.mjs
 
 COPY --from=build --chown=node:node /app/apps/api/package.json ./apps/api/package.json
 COPY --from=build --chown=node:node /app/apps/api/dist ./apps/api/dist
