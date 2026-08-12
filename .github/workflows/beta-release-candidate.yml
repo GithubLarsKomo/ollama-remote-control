@@ -13,17 +13,30 @@ jobs:
   release-evidence:
     name: beta-release-candidate
     runs-on: ubuntu-24.04
-    timeout-minutes: 25
+    timeout-minutes: 35
 
     steps:
       - name: Checkout tested ref
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
 
-      - name: Set up Node 24
+      - name: Resolve authoritative release metadata
+        id: release
+        shell: bash
+        run: |
+          set -euo pipefail
+          version="$(jq -er '.version' release/version.json)"
+          node_version="$(jq -er '.nodeVersion' release/version.json)"
+          npm_version="$(jq -er '.npmVersion' release/version.json)"
+          [[ "$version" =~ ^0\.1\.0-beta\.[1-9][0-9]*$ ]]
+          [[ "$node_version" =~ ^24\.[0-9]+\.[0-9]+$ ]]
+          [[ "$npm_version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]
+          printf 'version=%s\nnode_version=%s\nnpm_version=%s\n' "$version" "$node_version" "$npm_version" >> "$GITHUB_OUTPUT"
+
+      - name: Set up exact release Node
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
-          node-version: '24'
-          check-latest: true
+          node-version: ${{ steps.release.outputs.node_version }}
+          cache: npm
 
       - name: Resolve exact acceptance identity
         id: identity
@@ -177,6 +190,65 @@ jobs:
           if (expectedIds.size !== 0) throw new Error('RC scenario evidence is incomplete.');
           NODE
 
+      - name: Build exact-SHA release package
+        id: package
+        shell: bash
+        env:
+          TESTED_SHA: ${{ steps.identity.outputs.tested_sha }}
+          RELEASE_VERSION: ${{ steps.release.outputs.version }}
+          NPM_VERSION: ${{ steps.release.outputs.npm_version }}
+          NODE_VERSION: ${{ steps.release.outputs.node_version }}
+        run: |
+          set -euo pipefail
+          test "$(node --version)" = "v${NODE_VERSION}"
+          test "$(npm --version)" = "${NPM_VERSION}"
+          npm ci --ignore-scripts=false
+          npm run build
+          test -z "$(git status --porcelain --untracked-files=normal)"
+
+          base_tag='node:24-bookworm-slim'
+          docker pull "$base_tag"
+          base_ref="$(docker image inspect -f '{{index .RepoDigests 0}}' "$base_tag")"
+          base_id="$(docker image inspect -f '{{.Id}}' "$base_tag")"
+          [[ "$base_ref" == node@sha256:* ]]
+          [[ "$base_id" =~ ^sha256:[a-f0-9]{64}$ ]]
+
+          image_ref="ollama-remote-control:${RELEASE_VERSION}-${TESTED_SHA:0:12}"
+          docker build \
+            --build-arg "NODE_IMAGE=${base_ref}" \
+            --build-arg "ORC_VERSION=${RELEASE_VERSION}" \
+            --build-arg "ORC_COMMIT_SHA=${TESTED_SHA}" \
+            -t "$image_ref" .
+          image_id="$(docker image inspect -f '{{.Id}}' "$image_ref")"
+          [[ "$image_id" =~ ^sha256:[a-f0-9]{64}$ ]]
+          test "$(docker image inspect -f '{{ index .Config.Labels "org.opencontainers.image.version" }}' "$image_ref")" = "$RELEASE_VERSION"
+          test "$(docker image inspect -f '{{ index .Config.Labels "org.opencontainers.image.revision" }}' "$image_ref")" = "$TESTED_SHA"
+          test "$(docker run --rm --entrypoint node "$image_ref" --version)" = "v${NODE_VERSION}"
+
+          out="$RUNNER_TEMP/release-package"
+          npm run release:package -- \
+            --out "$out" \
+            --commit "$TESTED_SHA" \
+            --image-reference "$image_ref" \
+            --image-id "$image_id" \
+            --base-image-reference "$base_ref" \
+            --base-image-id "$base_id"
+          (cd "$out" && sha256sum -c SHA256SUMS)
+          jq -e \
+            --arg version "$RELEASE_VERSION" \
+            --arg sha "$TESTED_SHA" \
+            --arg image "$image_id" \
+            --arg base "$base_ref" \
+            '.schemaVersion == 1
+             and .releaseVersion == $version
+             and .commitSha == $sha
+             and .image.id == $image
+             and .inputs.baseImageReference == $base
+             and (.workspaces | length == 8)
+             and ([.workspaces[].releaseVersion] | all(. == $version))' \
+            "$out/release-manifest.json" >/dev/null
+          printf 'image_ref=%s\nimage_id=%s\nbase_ref=%s\n' "$image_ref" "$image_id" "$base_ref" >> "$GITHUB_OUTPUT"
+
       - name: Write bounded release evidence
         shell: bash
         env:
@@ -189,13 +261,23 @@ jobs:
             foundation-spike=passed \
             production-container=passed \
             exact-commit-binding=passed \
-            rc-scenarios=passed
+            rc-scenarios=passed \
+            release-packaging=passed
           cat "$RUNNER_TEMP/beta-rc-evidence.json" >> "$GITHUB_STEP_SUMMARY"
+          jq . "$RUNNER_TEMP/release-package/release-manifest.json" >> "$GITHUB_STEP_SUMMARY"
 
       - name: Upload bounded release evidence
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: beta-rc-evidence-${{ steps.identity.outputs.tested_sha }}
           path: ${{ runner.temp }}/beta-rc-evidence.json
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Upload exact-SHA release package evidence
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: orc-${{ steps.release.outputs.version }}-${{ steps.identity.outputs.tested_sha }}
+          path: ${{ runner.temp }}/release-package
           if-no-files-found: error
           retention-days: 30
