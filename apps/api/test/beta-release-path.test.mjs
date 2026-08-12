@@ -165,6 +165,14 @@ async function waitForCoreJob(app, cookies, jobId, predicate, timeoutMs = 8000) 
   }
   assert.fail(`Timed out waiting for core job ${jobId}.`);
 }
+async function waitForPullRequest(state, expectedCount, timeoutMs = 5000) {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    if (state.pullCalls >= expectedCount) return;
+    await delay(25);
+  }
+  assert.fail(`Timed out waiting for ${expectedCount} Ollama pull request(s).`);
+}
 async function waitForCreateJob(app, cookies, jobId, predicate, timeoutMs = 8000) {
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
@@ -213,6 +221,7 @@ test('0.1 beta joined release path survives browser/app reconnect and preserves 
     assert.equal(pull.statusCode, 202);
     const pullJobId = pull.json().job.id;
     await waitForCoreJob(app, cookies, pullJobId, (job) => job.state === 'running');
+    await waitForPullRequest(state, 1);
     assert.equal(state.pullCalls, 1);
 
     const reconnected = await app.inject({
