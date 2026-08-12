@@ -23,7 +23,7 @@ test('release version and toolchain have one explicit authoritative source', () 
   assert.equal(rootPackage.scripts['release:package'], 'node scripts/release-package.mjs');
 });
 
-test('release packaging binds exact source, lock, workspaces and Docker identities', () => {
+test('release packaging binds exact source, lock, workspaces, Docker and third-party license identities', () => {
   const source = text('scripts/release-package.mjs');
   for (const marker of [
     'packageLockSha256',
@@ -36,6 +36,9 @@ test('release packaging binds exact source, lock, workspaces and Docker identiti
     'releaseVersion',
     'Expected 8 private workspaces',
     'Release packaging requires a clean Git worktree',
+    'buildThirdPartyLicenseInventory',
+    'third-party-licenses.json',
+    'inventorySha256',
     'SHA256SUMS',
   ]) {
     assert.ok(source.includes(marker), `release packaging source missing ${marker}`);
@@ -75,11 +78,14 @@ test('beta release candidate fails closed through locked exact-SHA packaging', (
   assert.ok(workflow.includes('production-container'));
 });
 
-test('release documentation keeps package evidence bounded and separate from public release', () => {
+test('release documentation keeps package and license evidence bounded and separate from a project grant', () => {
   const docs = text('docs/RELEASE-PACKAGING.md');
   assert.match(docs, /exact tested Git SHA/i);
   assert.match(docs, /package-lock SHA-256/i);
   assert.match(docs, /immutable base-image reference/i);
+  assert.match(docs, /third-party-licenses\.json/i);
+  assert.match(docs, /factual dependency metadata only/i);
+  assert.match(docs, /not legal advice/i);
   assert.match(docs, /contains no `\/data`, master key, SSH credential/i);
   assert.match(docs, /publishing a registry image or public release is a separate release action/i);
   assert.match(docs, /project license decision/i);
