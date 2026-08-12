@@ -159,6 +159,7 @@ jobs:
             'modelfile-deploy-lineage',
             'container-audit-safety',
             'restart-update-rollback',
+            'application-state-backup-restore',
             'browser-reconnect-surfaces',
           ]);
           if (evidence?.schemaVersion !== 1 || evidence?.commitSha !== expectedSha || evidence?.overall !== 'passed') {
