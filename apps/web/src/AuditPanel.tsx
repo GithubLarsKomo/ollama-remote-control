@@ -253,7 +253,7 @@ export default function AuditPanel({ targets, onSignedOut }: AuditPanelProps) {
         </div>
       ) : null}
 
-      <div className="user-actions" style={{ justifyContent: 'space-between', marginTop: '1rem' }}>
+      <div className="user-actions audit-pagination" style={{ justifyContent: 'space-between', marginTop: '1rem' }}>
         <button
           className="secondary-button"
           disabled={busy || offset === 0}
@@ -262,7 +262,7 @@ export default function AuditPanel({ targets, onSignedOut }: AuditPanelProps) {
         >
           Previous
         </button>
-        <span className="muted">Rows {events.length === 0 ? 0 : offset + 1}–{offset + events.length}</span>
+        <span className="muted" role="status">Rows {events.length === 0 ? 0 : offset + 1}–{offset + events.length}</span>
         <button
           className="secondary-button"
           disabled={busy || !hasMore}
