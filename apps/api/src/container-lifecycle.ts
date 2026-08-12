@@ -7,6 +7,7 @@ import type {
 import {
   changeDockerContainerState,
   DockerLifecycleError,
+  inspectDockerContainer,
   type DockerContainerStatus,
   type DockerLifecycleAction,
 } from '@orc/docker';
@@ -184,7 +185,6 @@ export class ContainerLifecycleService {
         result: 'queued',
         jobId: job.id,
       });
-      this.jobs.transition(job.id, 'running');
 
       const executor = {
         exec: (argv: readonly string[]) => execPrivateKey(
@@ -193,6 +193,16 @@ export class ContainerLifecycleService {
           { timeoutMs: 30_000, maxOutputBytes: 512 * 1024 },
         ),
       };
+      const initial = await inspectDockerContainer(executor, resolved.target.selectedContainerId);
+      this.jobs.transition(job.id, 'running', {
+        result: {
+          action,
+          containerId: resolved.target.selectedContainerId,
+          initialRunning: initial.running,
+          initialStartedAt: initial.startedAt,
+        },
+      });
+
       const verified = await changeDockerContainerState(
         executor,
         resolved.target.selectedContainerId,
