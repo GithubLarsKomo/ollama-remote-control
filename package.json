@@ -3,6 +3,7 @@
   "version": "0.0.0",
   "private": true,
   "type": "module",
+  "packageManager": "npm@11.17.0",
   "workspaces": [
     "apps/*",
     "packages/*"
@@ -13,7 +14,8 @@
   "scripts": {
     "build": "tsc -b packages/core packages/security packages/db packages/ssh packages/docker packages/ollama apps/api && npm run build --workspace @orc/web",
     "test": "npm run build && node --test --test-concurrency=1 packages/core/test/*.test.mjs packages/security/test/*.test.mjs packages/docker/test/*.test.mjs packages/db/test/*.test.mjs apps/api/test/*.test.mjs && npm run test --workspace @orc/web",
-    "spike:foundation": "node spikes/foundation/run.mjs"
+    "spike:foundation": "node spikes/foundation/run.mjs",
+    "release:package": "node scripts/release-package.mjs"
   },
   "dependencies": {
     "argon2": "0.45.1",
