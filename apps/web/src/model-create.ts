@@ -68,6 +68,10 @@ function revisionPath(targetId: string, modelfileId: string, revisionId: string)
   return `/api/v1/targets/${encodeURIComponent(targetId)}/modelfiles/${encodeURIComponent(modelfileId)}/revisions/${encodeURIComponent(revisionId)}`;
 }
 
+export function modelfileDeployPlanRequestBody(outputModel: string, replaceExisting = false): Readonly<{ outputModel: string; replaceExisting: boolean }> {
+  return { outputModel, replaceExisting };
+}
+
 export function createModelfileDeployPlan(
   targetId: string,
   modelfileId: string,
@@ -78,7 +82,7 @@ export function createModelfileDeployPlan(
   return requestJson(`${revisionPath(targetId, modelfileId, revisionId)}/deploy-plan`, {
     method: 'POST',
     headers: mutationHeaders(),
-    body: JSON.stringify({ outputModel, replaceExisting }),
+    body: JSON.stringify(modelfileDeployPlanRequestBody(outputModel, replaceExisting)),
   });
 }
 
