@@ -18,9 +18,10 @@ Der funktionale Beta-Pfad ist weitgehend vollständig und wird auf Pull-Request-
 - Compose-validierte Ollama-Updates mit Digest-Pinning, Healthcheck, automatischem/manuellem Rollback und Recovery;
 - Audit-Historie, JSON/CSV-Export und Retention;
 - `/data`-Backup/Restore, Mutation-Failure/Recovery-Matrix und exakte Release-Candidate-Szenarien;
-- bounded Accessibility-/Responsive-Hardening mit dokumentierten manuellen Restchecks.
+- bounded Accessibility-/Responsive-Hardening mit dokumentierten manuellen Restchecks;
+- eine autoritative 0.1-Beta-Release-Version und ein exakt SHA-/Lock-/Image-gebundenes, gechecksummtes Release-Evidence-Paket.
 
-Vor der **öffentlichen** Beta bleiben insbesondere die tatsächlich verpflichtende GitHub-Repository-Policy für `beta-acceptance`, reproduzierbare Release-Paketierung/Versionierung sowie die explizite Projekt-Lizenzentscheidung offen. Siehe Issue `#84`.
+Vor der **öffentlichen** Beta bleiben insbesondere die tatsächlich verpflichtende GitHub-Repository-Policy für `beta-acceptance` sowie die explizite Projekt-Lizenzentscheidung offen. Siehe Issue `#84`.
 
 Für die 0.1-Beta sind **Expert Mode** und **Model Delete** normativ auf post-beta verschoben. Standalone-Ollama-Targets bleiben für normale Administration unterstützt; die Update-Ausführung ist für 0.1 Beta bewusst fail-closed und nur für positiv validierte Docker-Compose-Targets freigeschaltet.
 
@@ -48,6 +49,7 @@ Für die 0.1-Beta sind **Expert Mode** und **Model Delete** normativ auf post-be
 - [`docs/BETA-RC-SCENARIOS.md`](docs/BETA-RC-SCENARIOS.md) – exakte Release-Candidate-Szenario-Evidence
 - [`docs/BETA-FAILURE-RECOVERY-MATRIX.md`](docs/BETA-FAILURE-RECOVERY-MATRIX.md) – Mutation-/Restart-Recovery-Abdeckung
 - [`docs/BETA-ACCESSIBILITY-RESPONSIVE.md`](docs/BETA-ACCESSIBILITY-RESPONSIVE.md) – Accessibility-/Responsive-Scope und manuelle Restchecks
+- [`docs/RELEASE-PACKAGING.md`](docs/RELEASE-PACKAGING.md) – autoritative Beta-Version, exakte Build-Identität und Artifact-Verifikation
 - [`docs/adr/`](docs/adr/) – Architecture Decision Records
 
 ## Entwicklung
@@ -93,13 +95,14 @@ Ein Beta-Release-Kandidat ist nur akzeptiert, wenn für denselben getesteten SHA
 3. `beta-acceptance`;
 4. `beta-release-candidate`.
 
+`beta-release-candidate` erstellt zusätzlich ein begrenztes Release-Paket für den getesteten SHA. Es bindet die öffentliche Version aus `release/version.json`, den Lockfile-Hash, die exakte Node/npm-Toolchain, den aufgelösten Base-Image-Digest, die resultierende Image-ID und OCI-Version/Revision. Das Paket enthält keine `/data`- oder Secret-Inhalte; Verifikation und Reproduktion sind in [`docs/RELEASE-PACKAGING.md`](docs/RELEASE-PACKAGING.md) beschrieben.
+
 Der Workflow allein macht `beta-acceptance` noch nicht zu einer verpflichtenden Merge-Regel. Die `main`-Repository-Policy muss diesen Check zusätzlich als required konfigurieren und mit einem absichtlich roten Kandidaten verifiziert werden.
 
 ## Roadmap
 
 ### Bis öffentliche 0.1 Beta
 
-- reproduzierbare Versionierung/Release-Paketierung und Artifact-Evidence (`#144`);
 - explizite Projekt-Lizenzentscheidung (`#145`);
 - verpflichtende Repository-Policy für `beta-acceptance` verifizieren (`#105`).
 

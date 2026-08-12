@@ -1,4 +1,5 @@
-FROM node:24-bookworm-slim AS build
+ARG NODE_IMAGE=node:24-bookworm-slim
+FROM ${NODE_IMAGE} AS build
 
 WORKDIR /app
 
@@ -7,6 +8,7 @@ RUN apt-get update \
     && rm -rf /var/lib/apt/lists/*
 
 COPY package.json package-lock.json tsconfig.base.json ./
+COPY release/version.json ./release/version.json
 COPY apps/api/package.json ./apps/api/package.json
 COPY apps/web/package.json ./apps/web/package.json
 COPY packages/core/package.json ./packages/core/package.json
@@ -26,7 +28,14 @@ RUN npm run build \
     && npm prune --omit=dev --ignore-scripts=false \
     && npm cache clean --force
 
-FROM node:24-bookworm-slim AS runtime
+FROM ${NODE_IMAGE} AS runtime
+
+ARG ORC_VERSION=0.0.0-dev
+ARG ORC_COMMIT_SHA=unknown
+
+LABEL org.opencontainers.image.title="Ollama Remote Control" \
+      org.opencontainers.image.version="${ORC_VERSION}" \
+      org.opencontainers.image.revision="${ORC_COMMIT_SHA}"
 
 WORKDIR /app
 
@@ -34,13 +43,16 @@ ENV NODE_ENV=production \
     HOST=0.0.0.0 \
     PORT=3000 \
     ORC_DATABASE_PATH=/data/ollama-remote-control.sqlite \
-    ORC_WEB_DIST_PATH=/app/apps/web/dist
+    ORC_WEB_DIST_PATH=/app/apps/web/dist \
+    ORC_RELEASE_VERSION=${ORC_VERSION} \
+    ORC_COMMIT_SHA=${ORC_COMMIT_SHA}
 
 RUN mkdir -p /data \
     && chown node:node /data
 
 COPY --from=build --chown=node:node /app/node_modules ./node_modules
 COPY --from=build --chown=node:node /app/package.json /app/package-lock.json ./
+COPY --from=build --chown=node:node /app/release/version.json ./release/version.json
 COPY --from=build --chown=node:node /app/scripts/orc-data-backup.mjs ./scripts/orc-data-backup.mjs
 
 COPY --from=build --chown=node:node /app/apps/api/package.json ./apps/api/package.json
