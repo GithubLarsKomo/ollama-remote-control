@@ -58,6 +58,7 @@ export default function ModelCreatePanel({ targetId, disabled, onSignedOut, onSu
   const [revisions, setRevisions] = useState<readonly ModelfileRevisionSummaryView[]>([]);
   const [revisionId, setRevisionId] = useState('');
   const [outputModel, setOutputModel] = useState('');
+  const [replaceExisting, setReplaceExisting] = useState(false);
   const [plan, setPlan] = useState<ModelfileDeployPlanView | null>(null);
   const [job, setJob] = useState<PublicCreateJob | null>(null);
   const [progress, setProgress] = useState<readonly string[]>([]);
@@ -137,7 +138,7 @@ export default function ModelCreatePanel({ targetId, disabled, onSignedOut, onSu
     setProgress([]);
     setError(null);
     setNotice(null);
-  }, [outputModel, revisionId, targetId]);
+  }, [outputModel, replaceExisting, revisionId, targetId]);
 
   useEffect(() => {
     if (!job || terminal(job)) return;
@@ -183,7 +184,7 @@ export default function ModelCreatePanel({ targetId, disabled, onSignedOut, onSu
 
   useEffect(() => {
     if (job?.state !== 'succeeded') return;
-    setNotice('Created model passed remote inventory and semantic /api/show verification.');
+    setNotice('Model deployment passed remote inventory and semantic /api/show verification.');
     void onSucceeded();
   }, [job?.state, onSucceeded]);
 
@@ -209,9 +210,11 @@ export default function ModelCreatePanel({ targetId, disabled, onSignedOut, onSu
     setJob(null);
     setProgress([]);
     try {
-      const response = await createModelfileDeployPlan(targetId, artifactId, revisionId, outputModel);
+      const response = await createModelfileDeployPlan(targetId, artifactId, revisionId, outputModel, replaceExisting);
       setPlan(response.plan);
-      setNotice('Plan created. Review the immutable revision, destination and verification scope before confirming.');
+      setNotice(response.plan.operation === 'replace'
+        ? 'Replacement plan created. Review the exact existing destination identity before confirming rebuild.'
+        : 'Plan created. Review the immutable revision, destination and verification scope before confirming.');
     } catch (planError) {
       handleError(planError);
     } finally {
@@ -227,7 +230,7 @@ export default function ModelCreatePanel({ targetId, disabled, onSignedOut, onSu
     try {
       const response = await confirmModelfileDeploy(targetId, artifactId, revisionId, plan);
       setJob(response.job);
-      setNotice('Create job accepted. API stream success is provisional until remote verification completes.');
+      setNotice(`${plan.operation === 'replace' ? 'Replace/rebuild' : 'Create'} job accepted. API stream success is provisional until remote verification completes.`);
     } catch (confirmError) {
       handleError(confirmError);
     } finally {
@@ -254,7 +257,7 @@ export default function ModelCreatePanel({ targetId, disabled, onSignedOut, onSu
       <div className="models-section-heading">
         <div>
           <p className="eyebrow">Confirmed immutable deployment</p>
-          <h3 id="model-create-title">Create model from Modelfile revision</h3>
+          <h3 id="model-create-title">Create or rebuild model from Modelfile revision</h3>
           <p className="muted">
             First create a short-lived server-authoritative plan. A second confirmation starts the persistent job; success is reported only after fresh Ollama inventory and semantic <code>/api/show</code> verification.
           </p>
@@ -292,19 +295,34 @@ export default function ModelCreatePanel({ targetId, disabled, onSignedOut, onSu
             value={outputModel}
           />
         </label>
+        <label className="model-create-replace-toggle">
+          <input
+            checked={replaceExisting}
+            disabled={disabled || busy || Boolean(job && !terminal(job))}
+            onChange={(event) => setReplaceExisting(event.target.checked)}
+            type="checkbox"
+          />
+          Replace/rebuild an existing model with this exact name
+        </label>
         <button
           className="secondary-button"
           disabled={disabled || busy || !artifactId || !revisionId || !outputModel.trim() || Boolean(job && !terminal(job))}
           onClick={() => void preparePlan()}
           type="button"
         >
-          {busy && !plan ? 'Planning…' : 'Create fresh deploy plan'}
+          {busy && !plan ? 'Planning…' : replaceExisting ? 'Create replacement plan' : 'Create fresh deploy plan'}
         </button>
       </div>
 
+      {replaceExisting ? (
+        <p className="models-notice" role="note">
+          Replacement is never a generic overwrite. Planning must observe the existing destination and bind its exact digest and size to the confirmation token; execution refuses a missing or changed destination.
+        </p>
+      ) : null}
+
       {historicalRevisionSelected ? (
         <p className="models-notice" role="note">
-          Historical immutable revision selected. Redeployment always creates a fresh server-side plan and still refuses an existing destination model; selecting an older revision does not enable overwrite or reuse stale authority.
+          Historical immutable revision selected. Redeployment always creates a fresh server-side plan. Reusing an existing destination requires the explicit replacement mode and a newly observed destination identity.
         </p>
       ) : null}
 
@@ -323,17 +341,32 @@ export default function ModelCreatePanel({ targetId, disabled, onSignedOut, onSu
       {plan ? (
         <section className="model-create-plan" aria-label="Deploy plan confirmation">
           <div className="model-row-heading">
-            <h4>Review before confirmation</h4>
-            <span className="status-pill status-muted">Expires {formatTimestamp(plan.expiresAt)}</span>
+            <h4>{plan.operation === 'replace' ? 'Review replacement before confirmation' : 'Review before confirmation'}</h4>
+            <span className={`status-pill ${plan.operation === 'replace' ? 'status-danger' : 'status-muted'}`}>
+              {plan.operation === 'replace' ? 'Replace/rebuild' : 'Create'} · Expires {formatTimestamp(plan.expiresAt)}
+            </span>
           </div>
           <dl className="model-create-plan-grid">
+            <div><dt>Operation</dt><dd><strong>{plan.operation === 'replace' ? 'Replace/rebuild existing model' : 'Create new model'}</strong></dd></div>
+            <div><dt>Target</dt><dd><code>{plan.targetId}</code></dd></div>
             <div><dt>Revision</dt><dd>r{selectedRevision?.revisionNumber ?? '?'} · <code>{shortHash(plan.revisionSha256)}</code></dd></div>
             <div><dt>Destination</dt><dd><strong>{plan.outputModel}</strong></dd></div>
             <div><dt>Base model</dt><dd>{plan.baseModel}</dd></div>
             <div><dt>Container</dt><dd><code>{plan.selectedContainerId}</code></dd></div>
+            {plan.existingDestination ? (
+              <>
+                <div><dt>Existing digest</dt><dd><code>{plan.existingDestination.digest}</code></dd></div>
+                <div><dt>Existing size</dt><dd>{plan.existingDestination.sizeBytes.toLocaleString()} bytes</dd></div>
+              </>
+            ) : null}
             <div><dt>Ollama API</dt><dd>{plan.apiVersion}</dd></div>
             <div><dt>Verification</dt><dd>{plan.expectedFields.join(', ') || 'model presence'}</dd></div>
           </dl>
+          {plan.operation === 'replace' ? (
+            <p className="error-box" role="note">
+              This confirmation is bound to the existing destination digest and size shown above. If the model is removed, replaced, or changes before execution, the server refuses the rebuild and no create request is sent.
+            </p>
+          ) : null}
           <p className="muted">
             The browser cannot alter SYSTEM, TEMPLATE, parameters, messages, license, renderer or parser here. Those fields are recompiled from revision <code>{plan.revisionId}</code> when you confirm.
           </p>
@@ -343,7 +376,7 @@ export default function ModelCreatePanel({ targetId, disabled, onSignedOut, onSu
             onClick={() => void confirmPlan()}
             type="button"
           >
-            Confirm and create {plan.outputModel}
+            {plan.operation === 'replace' ? `Confirm replace/rebuild ${plan.outputModel}` : `Confirm and create ${plan.outputModel}`}
           </button>
         </section>
       ) : null}
