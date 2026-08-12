@@ -3,6 +3,7 @@ import { createRoot } from 'react-dom/client';
 import App from './App.js';
 import './styles.css';
 import './models-navigation.css';
+import './accessibility-responsive.css';
 
 const root = document.getElementById('root');
 if (!root) throw new Error('Web application root element is missing.');
