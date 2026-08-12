@@ -38,11 +38,29 @@ test('release packaging binds exact source, lock, workspaces, Docker and third-p
     'Release packaging requires a clean Git worktree',
     'buildThirdPartyLicenseInventory',
     'third-party-licenses.json',
+    'third-party-license-evidence.json',
+    'reviewedEvidenceSha256',
     'inventorySha256',
     'SHA256SUMS',
   ]) {
     assert.ok(source.includes(marker), `release packaging source missing ${marker}`);
   }
+});
+
+test('reviewed missing-lock license evidence is exact-version and immutable-source bound', () => {
+  const evidence = json('release/third-party-license-evidence.json');
+  assert.equal(evidence.schemaVersion, 1);
+  assert.deepEqual(Object.keys(evidence.overrides), ['buildcheck@0.0.7']);
+  assert.deepEqual(evidence.overrides['buildcheck@0.0.7'], {
+    license: 'MIT',
+    repository: 'mscdex/buildcheck',
+    commitSha: '98d046cecfa784ac5522f8491d9f46a907da6743',
+    packageJsonPath: 'package.json',
+    packageJsonBlobSha: 'bbb9c75f7dc481f566da726ce7ed9d2a0f120ea3',
+    licensePath: 'LICENSE',
+    licenseBlobSha: '290762e94f4e2f2b52cc13ae4f2b63ac0269bfd1',
+    reviewNote: 'Exact upstream 0.0.7 release commit declares MIT in package.json and contains the matching MIT LICENSE text. Used only because npm lock metadata omits the license field.',
+  });
 });
 
 test('production image accepts immutable base and exposes non-sensitive release labels', () => {
@@ -84,6 +102,8 @@ test('release documentation keeps package and license evidence bounded and separ
   assert.match(docs, /package-lock SHA-256/i);
   assert.match(docs, /immutable base-image reference/i);
   assert.match(docs, /third-party-licenses\.json/i);
+  assert.match(docs, /third-party-license-evidence\.json/i);
+  assert.match(docs, /exact reviewed evidence/i);
   assert.match(docs, /factual dependency metadata only/i);
   assert.match(docs, /not legal advice/i);
   assert.match(docs, /contains no `\/data`, master key, SSH credential/i);
