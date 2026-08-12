@@ -57,6 +57,7 @@ jobs:
           gh workflow run production-container.yml --ref "$GITHUB_REF_NAME"
 
       - name: Require successful release gates for exact source SHA
+        id: gates
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
@@ -75,6 +76,7 @@ jobs:
               -H 'X-GitHub-Api-Version: 2022-11-28' \
               "$api")"
             all_green=1
+            foundation_run_id=''
             for workflow in "${required[@]}"; do
               row="$(jq -c --arg name "$workflow" '[.workflow_runs[] | select(.name == $name)] | sort_by(.run_number) | reverse | .[0] // null' <<<"$payload")"
               if [[ "$row" == "null" ]]; then
@@ -85,6 +87,9 @@ jobs:
               status="$(jq -r '.status' <<<"$row")"
               conclusion="$(jq -r '.conclusion // ""' <<<"$row")"
               echo "${workflow}: status=${status} conclusion=${conclusion:-pending}"
+              if [[ "$workflow" == 'foundation-spike' ]]; then
+                foundation_run_id="$(jq -r '.id' <<<"$row")"
+              fi
               if [[ "$status" == "completed" && "$conclusion" != "success" ]]; then
                 echo "Required workflow ${workflow} completed with ${conclusion:-unknown}; release acceptance fails closed." >&2
                 exit 1
@@ -94,6 +99,11 @@ jobs:
               fi
             done
             if [[ "$all_green" == 1 ]]; then
+              if [[ ! "$foundation_run_id" =~ ^[0-9]+$ ]]; then
+                echo 'Unable to bind release evidence to the successful foundation run.' >&2
+                exit 1
+              fi
+              printf 'foundation_run_id=%s\n' "$foundation_run_id" >> "$GITHUB_OUTPUT"
               exit 0
             fi
             if [[ "$attempt" == 75 ]]; then
@@ -102,6 +112,68 @@ jobs:
             fi
             sleep 15
           done
+
+      - name: Require exact-SHA bounded RC scenario evidence
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          FOUNDATION_RUN_ID: ${{ steps.gates.outputs.foundation_run_id }}
+          REPOSITORY: ${{ github.repository }}
+          TESTED_SHA: ${{ steps.identity.outputs.tested_sha }}
+        run: |
+          set -euo pipefail
+          expected_name="beta-rc-scenarios-${TESTED_SHA}"
+          artifacts="$(curl --fail --silent --show-error \
+            -H 'Accept: application/vnd.github+json' \
+            -H "Authorization: Bearer ${GH_TOKEN}" \
+            -H 'X-GitHub-Api-Version: 2022-11-28' \
+            "https://api.github.com/repos/${REPOSITORY}/actions/runs/${FOUNDATION_RUN_ID}/artifacts?per_page=100")"
+          row="$(jq -c --arg name "$expected_name" '[.artifacts[] | select(.name == $name and .expired == false)] | .[0] // null' <<<"$artifacts")"
+          if [[ "$row" == 'null' ]]; then
+            echo "Required RC scenario artifact ${expected_name} is missing or expired." >&2
+            exit 1
+          fi
+          artifact_id="$(jq -r '.id' <<<"$row")"
+          if [[ ! "$artifact_id" =~ ^[0-9]+$ ]]; then
+            echo 'RC scenario artifact identity is invalid.' >&2
+            exit 1
+          fi
+          curl --fail --silent --show-error --location \
+            -H 'Accept: application/vnd.github+json' \
+            -H "Authorization: Bearer ${GH_TOKEN}" \
+            -H 'X-GitHub-Api-Version: 2022-11-28' \
+            "https://api.github.com/repos/${REPOSITORY}/actions/artifacts/${artifact_id}/zip" \
+            --output "$RUNNER_TEMP/beta-rc-scenarios.zip"
+          mkdir "$RUNNER_TEMP/beta-rc-scenarios"
+          unzip -q "$RUNNER_TEMP/beta-rc-scenarios.zip" -d "$RUNNER_TEMP/beta-rc-scenarios"
+          evidence="$RUNNER_TEMP/beta-rc-scenarios/beta-rc-scenarios.json"
+          test -f "$evidence"
+          node --input-type=module - "$evidence" "$TESTED_SHA" <<'NODE'
+          import fs from 'node:fs';
+          const [path, expectedSha] = process.argv.slice(2);
+          const evidence = JSON.parse(fs.readFileSync(path, 'utf8'));
+          const expectedIds = new Set([
+            'identity-target-onboarding',
+            'model-runtime-smoke',
+            'pull-reconnect-recovery',
+            'modelfile-deploy-lineage',
+            'container-audit-safety',
+            'restart-update-rollback',
+            'browser-reconnect-surfaces',
+          ]);
+          if (evidence?.schemaVersion !== 1 || evidence?.commitSha !== expectedSha || evidence?.overall !== 'passed') {
+            throw new Error('RC scenario evidence does not match the exact tested candidate.');
+          }
+          if (!Array.isArray(evidence.scenarios) || evidence.scenarios.length !== expectedIds.size) {
+            throw new Error('RC scenario evidence has an unexpected scenario set.');
+          }
+          for (const scenario of evidence.scenarios) {
+            if (!expectedIds.delete(scenario?.id) || scenario?.status !== 'passed') {
+              throw new Error('RC scenario evidence contains missing, duplicate or failed scenarios.');
+            }
+          }
+          if (expectedIds.size !== 0) throw new Error('RC scenario evidence is incomplete.');
+          NODE
 
       - name: Write bounded release evidence
         shell: bash
@@ -114,7 +186,8 @@ jobs:
             "$TESTED_SHA" \
             foundation-spike=passed \
             production-container=passed \
-            exact-commit-binding=passed
+            exact-commit-binding=passed \
+            rc-scenarios=passed
           cat "$RUNNER_TEMP/beta-rc-evidence.json" >> "$GITHUB_STEP_SUMMARY"
 
       - name: Upload bounded release evidence
