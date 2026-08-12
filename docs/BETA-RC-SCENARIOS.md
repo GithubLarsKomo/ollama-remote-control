@@ -16,4 +16,17 @@ Each command is executed without a shell. A nonzero exit code, signal/missing ex
 
 The output uses the bounded `beta-rc-evidence` schema and contains only the exact tested Git commit SHA plus scenario IDs and `passed`/`failed` states. Raw stdout/stderr, credentials, remote command output, Modelfile source, prompts and model output are not copied into the artifact.
 
-This file defines the runner contract only. The release-candidate workflow must execute the runner while the disposable SSH/Docker/Ollama fixtures are active before #123 can be considered complete.
+## Release-candidate wiring
+
+`foundation-spike` executes the scenario runner while its disposable SSH/Docker/Ollama fixture is still active and uploads `beta-rc-scenarios-<tested-sha>` with 30-day retention. The artifact contains only `beta-rc-scenarios.json` in the bounded schema above.
+
+`beta-release-candidate` first binds itself to the successful `foundation-spike` run selected for the same source SHA. It then requires the non-expired artifact whose name contains its own exact tested merge/ref SHA, downloads it, and fails closed unless the JSON has:
+
+- schema version 1;
+- the exact tested SHA;
+- overall status `passed`;
+- exactly the seven approved scenario IDs, each exactly once and each `passed`.
+
+A missing, expired, malformed, SHA-mismatched, incomplete or failed scenario artifact prevents release-candidate acceptance. The final bounded release evidence records `rc-scenarios=passed` only after this verification succeeds.
+
+The joined-path integration test additionally carries one persistent SQLite state through onboarding, pull reconnect/restart reconciliation, immutable Modelfile creation, confirmed model create/verification, audit inspection and a second application restart. This complements rather than replaces the scenario buckets.
