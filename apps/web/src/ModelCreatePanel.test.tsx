@@ -20,7 +20,7 @@ describe('ModelCreatePanel', () => {
     expect(html).toContain('Immutable revision');
     expect(html).toContain('Destination model');
     expect(html).toContain('short-lived server-authoritative plan');
-    expect(html).toContain('exact digest and size');
+    expect(html).toContain('existing destination digest and size');
     expect(html).not.toContain('Confirm and create');
     expect(html).not.toContain('Confirm replace / rebuild');
     expect(html).not.toContain('confirmationToken');
