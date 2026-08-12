@@ -68,6 +68,13 @@ export const betaRcScenarios = Object.freeze([
     ],
   },
   {
+    id: 'application-state-backup-restore',
+    command: process.execPath,
+    args: ['--test', '--test-concurrency=1',
+      'packages/db/test/backup-restore.test.mjs',
+    ],
+  },
+  {
     id: 'browser-reconnect-surfaces',
     command: 'npm',
     args: ['run', 'test', '--workspace', '@orc/web', '--',

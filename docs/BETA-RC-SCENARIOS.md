@@ -10,11 +10,12 @@ The scenario buckets cover:
 - Modelfile lifecycle, validation, create/replace, create reconciliation and lineage/source reads;
 - container logs/lifecycle, audit and persistent target-mutation conflict;
 - update and manual-rollback restart reconciliation;
+- application-state backup/restore, including restored durable SQLite evidence and the requirement that encrypted SSH credentials remain bound to the separately escrowed original master key;
 - browser/client reconnect and operator-surface contracts for pull, create/replace, logs, onboarding, audit and raw Modelfile import.
 
 Each command is executed without a shell. A nonzero exit code, signal/missing exit status, invalid scenario definition or evidence-write failure is fail-closed. The runner executes every bucket so one candidate run can expose more than one failing release area.
 
-The output uses the bounded `beta-rc-evidence` schema and contains only the exact tested Git commit SHA plus scenario IDs and `passed`/`failed` states. Raw stdout/stderr, credentials, remote command output, Modelfile source, prompts and model output are not copied into the artifact.
+The output uses the bounded `beta-rc-evidence` schema and contains only the exact tested Git commit SHA plus scenario IDs and `passed`/`failed` states. Raw stdout/stderr, credentials, remote command output, Modelfile source, prompts, backup contents, private keys, master keys and model output are not copied into the artifact.
 
 ## Release-candidate wiring
 
@@ -25,8 +26,10 @@ The output uses the bounded `beta-rc-evidence` schema and contains only the exac
 - schema version 1;
 - the exact tested SHA;
 - overall status `passed`;
-- exactly the seven approved scenario IDs, each exactly once and each `passed`.
+- exactly the eight approved scenario IDs, each exactly once and each `passed`.
 
 A missing, expired, malformed, SHA-mismatched, incomplete or failed scenario artifact prevents release-candidate acceptance. The final bounded release evidence records `rc-scenarios=passed` only after this verification succeeds.
 
 The joined-path integration test additionally carries one persistent SQLite state through onboarding, pull reconnect/restart reconciliation, immutable Modelfile creation, confirmed model create/verification, audit inspection and a second application restart. This complements rather than replaces the scenario buckets.
+
+The `application-state-backup-restore` bucket is intentionally separate from remote Ollama model storage. It proves management-application state recovery only; remote model/data volumes remain outside this backup claim.
