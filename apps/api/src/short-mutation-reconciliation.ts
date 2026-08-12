@@ -13,13 +13,13 @@ const SHORT_KINDS = new Set([
   'container.restart',
 ]);
 
-interface ModelMetadata {
+interface ModelMetadata extends Readonly<Record<string, unknown>> {
   readonly model: string;
   readonly digest: string;
   readonly selectedContainerId: string;
 }
 
-interface LifecycleMetadata {
+interface LifecycleMetadata extends Readonly<Record<string, unknown>> {
   readonly action: 'start' | 'stop' | 'restart';
   readonly containerId: string;
   readonly initialRunning: boolean;
