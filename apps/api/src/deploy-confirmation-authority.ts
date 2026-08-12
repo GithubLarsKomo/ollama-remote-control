@@ -10,6 +10,17 @@ export interface DeployConfirmationAuthority {
   readonly existingDestinationSizeBytes: number | null;
 }
 
+export interface DestinationIdentity {
+  readonly digest: string;
+  readonly sizeBytes: number;
+}
+
+export type DestinationAuthorityCheck =
+  | 'ok'
+  | 'destination-exists'
+  | 'replacement-target-missing'
+  | 'replacement-target-stale';
+
 interface TokenPayload {
   readonly r: boolean;
   readonly d: string | null;
@@ -56,4 +67,16 @@ export function parseDeployConfirmationToken(token: string): DeployConfirmationA
   } catch {
     return null;
   }
+}
+
+export function checkDestinationAuthority(
+  authority: DeployConfirmationAuthority,
+  destination: DestinationIdentity | null,
+): DestinationAuthorityCheck {
+  if (!authority.replaceExisting) return destination ? 'destination-exists' : 'ok';
+  if (!destination) return 'replacement-target-missing';
+  return destination.digest === authority.existingDestinationDigest
+    && destination.sizeBytes === authority.existingDestinationSizeBytes
+    ? 'ok'
+    : 'replacement-target-stale';
 }
