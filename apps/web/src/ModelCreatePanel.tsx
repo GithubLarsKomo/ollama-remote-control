@@ -28,6 +28,7 @@ interface ModelCreatePanelProps {
 }
 
 type EventPayload = Readonly<Record<string, unknown>>;
+type DeployOperation = 'create' | 'replace';
 
 function errorMessage(error: unknown): string {
   if (error instanceof ApiError) return `${error.code}: ${error.message}`;
@@ -41,6 +42,19 @@ function terminal(job: PublicCreateJob | null): boolean {
 
 function shortHash(hash: string): string {
   return `${hash.slice(0, 12)}…`;
+}
+
+function formatBytes(bytes: number): string {
+  if (!Number.isFinite(bytes) || bytes < 0) return 'unknown';
+  if (bytes < 1024) return `${bytes} B`;
+  const units = ['KiB', 'MiB', 'GiB', 'TiB'];
+  let value = bytes / 1024;
+  let unit = units[0];
+  for (let index = 1; index < units.length && value >= 1024; index += 1) {
+    value /= 1024;
+    unit = units[index];
+  }
+  return `${value.toFixed(value >= 10 ? 1 : 2)} ${unit}`;
 }
 
 function parseEvent(event: MessageEvent<string>): EventPayload | null {
@@ -58,6 +72,7 @@ export default function ModelCreatePanel({ targetId, disabled, onSignedOut, onSu
   const [revisions, setRevisions] = useState<readonly ModelfileRevisionSummaryView[]>([]);
   const [revisionId, setRevisionId] = useState('');
   const [outputModel, setOutputModel] = useState('');
+  const [operation, setOperation] = useState<DeployOperation>('create');
   const [plan, setPlan] = useState<ModelfileDeployPlanView | null>(null);
   const [job, setJob] = useState<PublicCreateJob | null>(null);
   const [progress, setProgress] = useState<readonly string[]>([]);
@@ -137,7 +152,7 @@ export default function ModelCreatePanel({ targetId, disabled, onSignedOut, onSu
     setProgress([]);
     setError(null);
     setNotice(null);
-  }, [outputModel, revisionId, targetId]);
+  }, [operation, outputModel, revisionId, targetId]);
 
   useEffect(() => {
     if (!job || terminal(job)) return;
@@ -183,9 +198,11 @@ export default function ModelCreatePanel({ targetId, disabled, onSignedOut, onSu
 
   useEffect(() => {
     if (job?.state !== 'succeeded') return;
-    setNotice('Created model passed remote inventory and semantic /api/show verification.');
+    setNotice(plan?.operation === 'replace'
+      ? 'Rebuilt model passed remote inventory and semantic /api/show verification.'
+      : 'Created model passed remote inventory and semantic /api/show verification.');
     void onSucceeded();
-  }, [job?.state, onSucceeded]);
+  }, [job?.state, onSucceeded, plan?.operation]);
 
   const selectedArtifact = useMemo(
     () => artifacts.find((item) => item.id === artifactId) ?? null,
@@ -209,11 +226,17 @@ export default function ModelCreatePanel({ targetId, disabled, onSignedOut, onSu
     setJob(null);
     setProgress([]);
     try {
-      const response = await createModelfileDeployPlan(targetId, artifactId, revisionId, outputModel);
+      const response = await createModelfileDeployPlan(targetId, artifactId, revisionId, outputModel, operation);
       setPlan(response.plan);
-      setNotice('Plan created. Review the immutable revision, destination and verification scope before confirming.');
+      setNotice(response.plan.operation === 'replace'
+        ? 'Replacement plan created from fresh server inventory. Review the exact existing model identity before confirming.'
+        : 'Plan created. Review the immutable revision, destination and verification scope before confirming.');
     } catch (planError) {
-      handleError(planError);
+      if (planError instanceof ApiError && planError.code === 'DEPLOY_DESTINATION_EXISTS' && operation === 'create') {
+        setError('DEPLOY_DESTINATION_EXISTS: Destination already exists. Select Replace / rebuild and create a fresh replacement plan; the existing model identity will be bound into that plan.');
+      } else {
+        handleError(planError);
+      }
     } finally {
       setBusy(false);
     }
@@ -227,7 +250,9 @@ export default function ModelCreatePanel({ targetId, disabled, onSignedOut, onSu
     try {
       const response = await confirmModelfileDeploy(targetId, artifactId, revisionId, plan);
       setJob(response.job);
-      setNotice('Create job accepted. API stream success is provisional until remote verification completes.');
+      setNotice(plan.operation === 'replace'
+        ? 'Replace/rebuild job accepted. The server revalidates the exact planned destination identity before mutation and verifies the rebuilt model afterward.'
+        : 'Create job accepted. API stream success is provisional until remote verification completes.');
     } catch (confirmError) {
       handleError(confirmError);
     } finally {
@@ -254,15 +279,33 @@ export default function ModelCreatePanel({ targetId, disabled, onSignedOut, onSu
       <div className="models-section-heading">
         <div>
           <p className="eyebrow">Confirmed immutable deployment</p>
-          <h3 id="model-create-title">Create model from Modelfile revision</h3>
+          <h3 id="model-create-title">Create or rebuild model from Modelfile revision</h3>
           <p className="muted">
-            First create a short-lived server-authoritative plan. A second confirmation starts the persistent job; success is reported only after fresh Ollama inventory and semantic <code>/api/show</code> verification.
+            First create a short-lived server-authoritative plan. Replacement is a distinct operation and binds the existing destination digest and size before a second confirmation starts the persistent job.
           </p>
         </div>
       </div>
 
       {error ? <p className="error-box" role="alert">{error}</p> : null}
       {notice ? <p className="modelfile-notice" role="status">{notice}</p> : null}
+
+      <fieldset className="model-create-operation" disabled={disabled || busy || Boolean(job && !terminal(job))}>
+        <legend>Deployment operation</legend>
+        <label>
+          <input checked={operation === 'create'} name="deploy-operation" onChange={() => setOperation('create')} type="radio" />
+          Create new model
+        </label>
+        <label>
+          <input checked={operation === 'replace'} name="deploy-operation" onChange={() => setOperation('replace')} type="radio" />
+          Replace / rebuild existing model
+        </label>
+      </fieldset>
+
+      {operation === 'replace' ? (
+        <p className="models-notice" role="note">
+          Replace/rebuild never trusts a generic overwrite flag. A fresh plan must observe the existing destination and bind its exact digest and size; execution fails if that identity changes before mutation.
+        </p>
+      ) : null}
 
       <div className="model-create-form-grid">
         <label>
@@ -298,13 +341,13 @@ export default function ModelCreatePanel({ targetId, disabled, onSignedOut, onSu
           onClick={() => void preparePlan()}
           type="button"
         >
-          {busy && !plan ? 'Planning…' : 'Create fresh deploy plan'}
+          {busy && !plan ? 'Planning…' : operation === 'replace' ? 'Create fresh replacement plan' : 'Create fresh deploy plan'}
         </button>
       </div>
 
       {historicalRevisionSelected ? (
         <p className="models-notice" role="note">
-          Historical immutable revision selected. Redeployment always creates a fresh server-side plan and still refuses an existing destination model; selecting an older revision does not enable overwrite or reuse stale authority.
+          Historical immutable revision selected. Redeployment always creates a fresh server-side plan; selecting an older revision never reuses stale authority.
         </p>
       ) : null}
 
@@ -323,27 +366,40 @@ export default function ModelCreatePanel({ targetId, disabled, onSignedOut, onSu
       {plan ? (
         <section className="model-create-plan" aria-label="Deploy plan confirmation">
           <div className="model-row-heading">
-            <h4>Review before confirmation</h4>
+            <h4>{plan.operation === 'replace' ? 'Review replacement before confirmation' : 'Review before confirmation'}</h4>
             <span className="status-pill status-muted">Expires {formatTimestamp(plan.expiresAt)}</span>
           </div>
           <dl className="model-create-plan-grid">
+            <div><dt>Operation</dt><dd><strong>{plan.operation === 'replace' ? 'Replace / rebuild existing model' : 'Create new model'}</strong></dd></div>
             <div><dt>Revision</dt><dd>r{selectedRevision?.revisionNumber ?? '?'} · <code>{shortHash(plan.revisionSha256)}</code></dd></div>
             <div><dt>Destination</dt><dd><strong>{plan.outputModel}</strong></dd></div>
             <div><dt>Base model</dt><dd>{plan.baseModel}</dd></div>
+            <div><dt>Target</dt><dd><code>{plan.targetId}</code></dd></div>
             <div><dt>Container</dt><dd><code>{plan.selectedContainerId}</code></dd></div>
             <div><dt>Ollama API</dt><dd>{plan.apiVersion}</dd></div>
             <div><dt>Verification</dt><dd>{plan.expectedFields.join(', ') || 'model presence'}</dd></div>
+            {plan.existingDestination ? (
+              <>
+                <div><dt>Existing digest</dt><dd><code>{plan.existingDestination.digest}</code></dd></div>
+                <div><dt>Existing size</dt><dd>{formatBytes(plan.existingDestination.sizeBytes)}</dd></div>
+              </>
+            ) : null}
           </dl>
           <p className="muted">
             The browser cannot alter SYSTEM, TEMPLATE, parameters, messages, license, renderer or parser here. Those fields are recompiled from revision <code>{plan.revisionId}</code> when you confirm.
           </p>
+          {plan.operation === 'replace' ? (
+            <p className="error-box" role="note">
+              Confirming rebuilds <strong>{plan.outputModel}</strong> only if the currently installed model still matches digest <code>{plan.existingDestination?.digest}</code> and size {plan.existingDestination ? formatBytes(plan.existingDestination.sizeBytes) : 'unknown'} on container <code>{plan.selectedContainerId}</code>.
+            </p>
+          ) : null}
           <button
             className="primary-button"
             disabled={disabled || busy || Boolean(job && !terminal(job))}
             onClick={() => void confirmPlan()}
             type="button"
           >
-            Confirm and create {plan.outputModel}
+            {plan.operation === 'replace' ? `Confirm replace / rebuild ${plan.outputModel}` : `Confirm and create ${plan.outputModel}`}
           </button>
         </section>
       ) : null}
@@ -351,7 +407,7 @@ export default function ModelCreatePanel({ targetId, disabled, onSignedOut, onSu
       {job ? (
         <section className="model-create-job" aria-label="Model create job">
           <div className="model-row-heading">
-            <h4>Create job</h4>
+            <h4>{plan?.operation === 'replace' ? 'Replace / rebuild job' : 'Create job'}</h4>
             <span className={`status-pill ${job.state === 'succeeded' ? 'status-ok' : job.state === 'failed' ? 'status-danger' : 'status-muted'}`}>{job.state}</span>
           </div>
           <p className="muted">Job <code>{job.id}</code>{job.errorClass ? <> · {job.errorClass}</> : null}</p>
