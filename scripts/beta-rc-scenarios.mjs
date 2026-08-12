@@ -1,3 +1,4 @@
+import fs from 'node:fs';
 import { spawnSync } from 'node:child_process';
 import { writeBetaReleaseEvidence } from './beta-rc-evidence.mjs';
 
@@ -104,6 +105,41 @@ export function validateScenarioDefinitions(scenarios = betaRcScenarios) {
   return scenarios;
 }
 
+export function resetDisposableRcFixture(environment = process.env, writeFile = fs.writeFileSync) {
+  if (!environment.ORC_CONTAINER_STATE) return false;
+  const required = [
+    'ORC_DOCKER_FIXTURE_LOG',
+    'ORC_SYSTEM_FIXTURE_LOG',
+    'ORC_LOG_PROCESS_STATE',
+    'ORC_LOG_PROCESS_PID',
+    'ORC_CONTAINER_STATE',
+    'ORC_LIFECYCLE_MODE',
+    'ORC_REGISTRY_MODE',
+    'ORC_COMPOSE_MODE',
+    'ORC_COMPOSE_STDIN',
+  ];
+  for (const name of required) {
+    if (typeof environment[name] !== 'string' || !environment[name]) {
+      throw new TypeError(`Disposable RC fixture is partially configured: ${name} is missing.`);
+    }
+  }
+  const writes = [
+    ['/tmp/orc-docker-fixture-mode', 'single'],
+    ['/tmp/orc-status-fixture-mode', 'normal'],
+    [environment.ORC_CONTAINER_STATE, 'running'],
+    [environment.ORC_LIFECYCLE_MODE, 'normal'],
+    [environment.ORC_REGISTRY_MODE, 'changed'],
+    [environment.ORC_COMPOSE_MODE, 'normal'],
+    [environment.ORC_DOCKER_FIXTURE_LOG, ''],
+    [environment.ORC_SYSTEM_FIXTURE_LOG, ''],
+    [environment.ORC_LOG_PROCESS_STATE, ''],
+    [environment.ORC_LOG_PROCESS_PID, ''],
+    [environment.ORC_COMPOSE_STDIN, ''],
+  ];
+  for (const [file, value] of writes) writeFile(file, value);
+  return true;
+}
+
 export function runBetaRcScenario(scenario, options = {}) {
   const spawn = options.spawnSync ?? spawnSync;
   const result = spawn(scenario.command, scenario.args, {
@@ -115,11 +151,18 @@ export function runBetaRcScenario(scenario, options = {}) {
   return result.status === 0 ? 'passed' : 'failed';
 }
 
-export async function runBetaRcScenarios({ outputPath, commitSha, scenarios = betaRcScenarios, spawnSync: spawn } = {}) {
+export async function runBetaRcScenarios({
+  outputPath,
+  commitSha,
+  scenarios = betaRcScenarios,
+  spawnSync: spawn,
+  resetFixture = resetDisposableRcFixture,
+} = {}) {
   if (!outputPath) throw new TypeError('outputPath is required.');
   validateScenarioDefinitions(scenarios);
   const results = [];
   for (const scenario of scenarios) {
+    resetFixture();
     console.log(`::group::beta RC scenario ${scenario.id}`);
     const status = runBetaRcScenario(scenario, { spawnSync: spawn });
     console.log(`::endgroup::`);

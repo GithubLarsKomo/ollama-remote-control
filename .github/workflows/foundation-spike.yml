@@ -361,6 +361,31 @@ jobs:
           ORC_COMPOSE_STDIN: /tmp/orc-compose-stdin
         run: npm test
 
+      - name: Run bounded beta RC scenarios in disposable fixture
+        env:
+          SSH_HOST: 127.0.0.1
+          SSH_PORT: '2222'
+          SSH_USER: orcspike
+          SSH_PRIVATE_KEY_PATH: ${{ runner.temp }}/orc_spike_key
+          ORC_DOCKER_FIXTURE_LOG: /tmp/orc-docker-calls
+          ORC_SYSTEM_FIXTURE_LOG: /tmp/orc-system-calls
+          ORC_LOG_PROCESS_STATE: /tmp/orc-log-state
+          ORC_LOG_PROCESS_PID: /tmp/orc-log-pid
+          ORC_CONTAINER_STATE: /tmp/orc-container-state
+          ORC_LIFECYCLE_MODE: /tmp/orc-lifecycle-mode
+          ORC_REGISTRY_MODE: /tmp/orc-registry-mode
+          ORC_COMPOSE_MODE: /tmp/orc-compose-mode
+          ORC_COMPOSE_STDIN: /tmp/orc-compose-stdin
+        run: node scripts/beta-rc-scenarios.mjs "$RUNNER_TEMP/beta-rc-scenarios.json" "$GITHUB_SHA"
+
+      - name: Upload bounded beta RC scenario evidence
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: beta-rc-scenarios-${{ github.sha }}
+          path: ${{ runner.temp }}/beta-rc-scenarios.json
+          if-no-files-found: error
+          retention-days: 30
+
       - name: Remove remote fixtures
         run: sudo rm -f /usr/local/bin/docker /usr/local/bin/nvidia-smi /usr/local/bin/df
 
