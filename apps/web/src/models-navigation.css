@@ -1,0 +1,42 @@
+.models-surface-nav {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.65rem;
+  margin: 1rem 0;
+  padding: 0.5rem;
+  border: 1px solid var(--border-color, #d7dce2);
+  border-radius: 0.75rem;
+  background: var(--panel-background, #fff);
+}
+
+.models-surface-nav .secondary-button {
+  min-width: 8rem;
+}
+
+.models-surface-nav .secondary-button.active,
+.models-surface-nav .secondary-button[aria-current='page'] {
+  font-weight: 700;
+  outline: 2px solid currentColor;
+  outline-offset: -2px;
+}
+
+.models-surface-nav .secondary-button:focus-visible {
+  outline: 3px solid currentColor;
+  outline-offset: 2px;
+}
+
+.modelfiles-surface {
+  scroll-margin-top: 1rem;
+}
+
+@media (max-width: 640px) {
+  .models-surface-nav {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+  }
+
+  .models-surface-nav .secondary-button {
+    min-width: 0;
+    width: 100%;
+  }
+}
