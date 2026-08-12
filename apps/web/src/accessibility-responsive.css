@@ -1,0 +1,106 @@
+/* Bounded 0.1-beta accessibility/responsive hardening.
+ * This supplements component CSS; it is not a claim of full WCAG conformance. */
+
+textarea {
+  max-width: 100%;
+  font: inherit;
+}
+
+textarea:focus-visible,
+a:focus-visible,
+summary:focus-visible {
+  outline: 3px solid var(--focus);
+  outline-offset: 2px;
+}
+
+a {
+  color: var(--accent);
+  overflow-wrap: anywhere;
+  text-underline-offset: 0.16em;
+}
+
+a:hover {
+  color: var(--focus);
+}
+
+pre,
+table,
+form,
+fieldset,
+.models-administration,
+.models-panel,
+.modelfiles-surface,
+.local-modelfiles,
+.modelfile-editor,
+.model-detail-panel {
+  max-width: 100%;
+}
+
+pre {
+  overflow: auto;
+}
+
+.user-actions,
+.modelfile-revision-actions,
+.model-detail-tabs,
+.models-surface-nav {
+  min-width: 0;
+  flex-wrap: wrap;
+}
+
+.model-table-wrap {
+  max-width: 100%;
+  overscroll-behavior-inline: contain;
+}
+
+.model-detail-tabs {
+  overflow-x: auto;
+  scrollbar-gutter: stable;
+}
+
+.model-detail-tab:focus-visible {
+  outline: 3px solid var(--focus);
+  outline-offset: 2px;
+}
+
+@media (max-width: 560px) {
+  .audit-pagination {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 0.65rem;
+    align-items: center;
+  }
+
+  .audit-pagination .muted {
+    grid-column: 1 / -1;
+    grid-row: 1;
+    text-align: center;
+  }
+
+  .audit-pagination .secondary-button {
+    width: 100%;
+  }
+
+  .models-surface-nav {
+    grid-template-columns: 1fr;
+  }
+
+  .model-detail-tabs {
+    flex-wrap: nowrap;
+    padding-bottom: 0.4rem;
+  }
+
+  .model-detail-tab {
+    flex: 0 0 auto;
+  }
+}
+
+@media (forced-colors: active) {
+  .status-pill,
+  .primary-button,
+  .secondary-button,
+  .model-loaded-badge,
+  .model-detail-tab {
+    forced-color-adjust: auto;
+  }
+}
