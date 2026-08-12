@@ -2,6 +2,7 @@ import { useState } from 'react';
 import type { TargetStatusResult } from './api.js';
 import type { ModelInventoryView } from './model-inventory.js';
 import LocalModelfilesPanel from './LocalModelfilesPanel.js';
+import ModelfileLibrarySummaryPanel from './ModelfileLibrarySummaryPanel.js';
 import RawModelfileImportPanel from './RawModelfileImportPanel.js';
 
 export default function LocalModelfilesWorkspace({
@@ -24,10 +25,11 @@ export default function LocalModelfilesWorkspace({
         onImported={() => setLibraryEpoch((value) => value + 1)}
         onSignedOut={onSignedOut}
       />
+      <ModelfileLibrarySummaryPanel key={`summary-${libraryEpoch}`} onSignedOut={onSignedOut} />
       <LocalModelfilesPanel
         disabled={disabled}
         inventory={inventory}
-        key={libraryEpoch}
+        key={`library-${libraryEpoch}`}
         onSignedOut={onSignedOut}
         status={status}
       />
