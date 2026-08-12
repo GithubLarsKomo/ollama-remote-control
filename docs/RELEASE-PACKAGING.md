@@ -37,6 +37,30 @@ The packaging step:
 
 The normal production-container gate may continue to test the moving supported Node 24 base with `--pull`. Release packaging records the exact base identity actually used by the candidate, so later verification does not pretend that a mutable tag alone is reproducible evidence.
 
+## Third-party license evidence
+
+`package-lock.json` is the default factual source for dependency license expressions. A missing license field is **not** interpreted as permissive and normally fails the release package closed.
+
+A narrowly reviewed exception may be recorded in:
+
+```text
+release/third-party-license-evidence.json
+```
+
+Such evidence is permitted only for an **exact `name@version`** and must identify an immutable upstream repository commit plus the reviewed `package.json` and license-file blob SHAs. The release process does not fetch those sources at build time; the evidence file records the prior human/maintainer review in a reproducible form.
+
+The evidence mechanism is deliberately fail-closed:
+
+- a different package version does not match the reviewed entry;
+- an evidence entry for a package no longer present is rejected as stale;
+- an evidence entry becomes stale if the current lockfile itself contains a non-empty license field for that exact package;
+- missing, malformed or conflicting evidence is rejected;
+- every evidence entry must be consumed by the exact locked package it was created for.
+
+The current evidence file contains one exceptional record for `buildcheck@0.0.7`. Its exact upstream v0.0.7 release commit declares MIT in `package.json` and contains the matching MIT `LICENSE`; npm's generated lock metadata for this dependency omits the license field. The reviewed upstream commit/blob identities are stored in the evidence file rather than duplicating or modifying `package-lock.json`.
+
+This mechanism records source evidence; it is not an inference engine and does not make a legal compatibility determination.
+
 ## Release bundle
 
 The bounded workflow artifact contains:
@@ -44,6 +68,7 @@ The bounded workflow artifact contains:
 ```text
 release-manifest.json
 third-party-licenses.json
+third-party-license-evidence.json
 version.json
 Dockerfile
 compose.yaml
@@ -61,9 +86,9 @@ SHA256SUMS
 - resulting production image reference and image ID;
 - OCI version/revision labels;
 - all eight private workspace identities and their internal package versions;
-- third-party package count, exact license-expression counts and the SHA-256 of `third-party-licenses.json`.
+- third-party package count, exact license-expression counts, reviewed-evidence count, evidence-file SHA-256 and the SHA-256 of `third-party-licenses.json`.
 
-`third-party-licenses.json` is a deterministic inventory of the unique locked third-party package name/version/license metadata present in `package-lock.json`. Local `@orc/*` workspace links are excluded. Missing or blank license metadata fails the release-package step closed instead of being interpreted as permissive.
+`third-party-licenses.json` is a deterministic inventory of the unique locked third-party package name/version/license metadata. Local `@orc/*` workspace links are excluded. Each package records whether its license expression came directly from `package-lock.json` or from exact reviewed evidence; reviewed records expose their immutable upstream repository/commit/blob identity.
 
 The inventory is **factual dependency metadata only**. It is not legal advice, does not decide compatibility with a future project license and is not itself a license grant. Issue #145 remains the explicit owner-level project-license decision.
 
@@ -78,9 +103,10 @@ cd release-package
 sha256sum -c SHA256SUMS
 jq . release-manifest.json
 jq . third-party-licenses.json
+jq . third-party-license-evidence.json
 ```
 
-Verify that `releaseVersion` is the intended beta version and `commitSha` is the exact accepted candidate. The `inputs.packageLockSha256`, Docker/Compose hashes, base-image identity and resulting image ID are evidence for the build that produced the artifact. The same package-lock SHA-256 must appear in `third-party-licenses.json`, and the inventory checksum must match `release-manifest.json`/`SHA256SUMS`.
+Verify that `releaseVersion` is the intended beta version and `commitSha` is the exact accepted candidate. The `inputs.packageLockSha256`, Docker/Compose hashes, base-image identity and resulting image ID are evidence for the build that produced the artifact. The same package-lock SHA-256 must appear in `third-party-licenses.json`; its reviewed-evidence SHA-256 must match `third-party-license-evidence.json`; and both files must be covered by `SHA256SUMS` and `release-manifest.json`.
 
 For a locally available candidate image, additionally verify:
 
@@ -108,15 +134,15 @@ npm run release:package -- \
   --base-image-id sha256:<64-hex>
 ```
 
-It refuses an unclean Git worktree, malformed commit/image identities, toolchain drift, package/lock mismatches, missing workspace synchronization or missing locked third-party license metadata.
+It refuses an unclean Git worktree, malformed commit/image identities, toolchain drift, package/lock mismatches, missing workspace synchronization, missing locked third-party license metadata, or stale/unused reviewed evidence.
 
-For a standalone factual inventory from a reviewed lockfile:
+For a standalone factual inventory from the reviewed lockfile/evidence pair:
 
 ```bash
 node scripts/third-party-license-inventory.mjs /tmp/third-party-licenses.json
 ```
 
-This command reads the local lockfile only; it does not contact package registries or licensing services.
+This command reads local version-controlled files only; it does not contact package registries or licensing services.
 
 ## Public release boundary
 
