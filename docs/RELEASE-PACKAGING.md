@@ -57,7 +57,12 @@ The evidence mechanism is deliberately fail-closed:
 - missing, malformed or conflicting evidence is rejected;
 - every evidence entry must be consumed by the exact locked package it was created for.
 
-The current evidence file contains one exceptional record for `buildcheck@0.0.7`. Its exact upstream v0.0.7 release commit declares MIT in `package.json` and contains the matching MIT `LICENSE`; npm's generated lock metadata for this dependency omits the license field. The reviewed upstream commit/blob identities are stored in the evidence file rather than duplicating or modifying `package-lock.json`.
+The current evidence file contains two exceptional records because npm's generated lock metadata omits their license fields:
+
+- `buildcheck@0.0.7`: exact upstream release commit `98d046cecfa784ac5522f8491d9f46a907da6743` declares MIT in `package.json` and contains the matching MIT `LICENSE`;
+- `cpu-features@0.0.10`: exact upstream release commit `3fc76509be992e460878aad775ffbde5cfe1da36` declares MIT in its `licenses` metadata and contains the matching MIT `LICENSE`.
+
+The reviewed upstream commit/blob identities are stored in the evidence file rather than duplicating or modifying `package-lock.json`.
 
 This mechanism records source evidence; it is not an inference engine and does not make a legal compatibility determination.
 
