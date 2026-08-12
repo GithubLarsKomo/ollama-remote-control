@@ -14,6 +14,7 @@ import ModelCreatePanel from './ModelCreatePanel.js';
 import ModelDetailsPanel from './ModelDetailsPanel.js';
 import ModelPullPanel from './ModelPullPanel.js';
 import ModelUnloadControl from './ModelUnloadControl.js';
+import ModelfilePortabilityPanel from './ModelfilePortabilityPanel.js';
 import {
   fetchModelInventory,
   runningModelDigests,
@@ -27,11 +28,15 @@ import {
 } from './model-unload.js';
 import './models.css';
 
+type AdministrationSurface = 'models' | 'modelfiles';
+
 interface ModelsPanelProps {
   readonly status: TargetStatusResult;
   readonly disabled: boolean;
   readonly onSignedOut: () => void;
 }
+
+const EMPTY_INVENTORY = { installed: [], running: [] } as unknown as ModelInventoryView;
 
 function errorMessage(error: unknown): string {
   if (error instanceof ApiError) return `${error.code}: ${error.message}`;
@@ -87,6 +92,7 @@ function RunningModelCard({
 }
 
 export default function ModelsPanel({ status, disabled, onSignedOut }: ModelsPanelProps) {
+  const [surface, setSurface] = useState<AdministrationSurface>('models');
   const [inventory, setInventory] = useState<ModelInventoryView | null>(null);
   const [selectedModel, setSelectedModel] = useState<string | null>(null);
   const [activeMutation, setActiveMutation] = useState<ActiveTargetMutationView | null>(null);
@@ -172,155 +178,192 @@ export default function ModelsPanel({ status, disabled, onSignedOut }: ModelsPan
   }, [load, loadActiveMutation]);
 
   return (
-    <section className="models-panel" aria-labelledby="models-title">
-      <div className="models-heading">
-        <div>
-          <p className="eyebrow">Ollama API over pinned SSH</p>
-          <h2 id="models-title">Models</h2>
-          <p className="muted">
-            Inventory, details and local Modelfile revisions stay server-authoritative. Model pulls, creates and unloads use fixed Ollama API operations with remote verification. Port 11434 remains private.
-          </p>
-        </div>
+    <div className="models-administration">
+      <nav aria-label="Model administration" className="models-surface-nav">
         <button
-          className="secondary-button"
-          disabled={disabled || busy || !status.container.running}
-          onClick={() => void load()}
+          aria-current={surface === 'models' ? 'page' : undefined}
+          className={surface === 'models' ? 'secondary-button active' : 'secondary-button'}
+          onClick={() => setSurface('models')}
           type="button"
         >
-          {busy ? 'Refreshing…' : 'Refresh models'}
+          Models
         </button>
-      </div>
+        <button
+          aria-current={surface === 'modelfiles' ? 'page' : undefined}
+          className={surface === 'modelfiles' ? 'secondary-button active' : 'secondary-button'}
+          onClick={() => setSurface('modelfiles')}
+          type="button"
+        >
+          Modelfiles
+        </button>
+      </nav>
 
-      <ModelPullPanel
-        disabled={disabled || busy || !status.container.running}
-        onSignedOut={onSignedOut}
-        onSucceeded={load}
-        targetId={status.target.id}
-      />
-
-      <ModelCreatePanel
-        disabled={disabled || busy || !status.container.running}
-        onSignedOut={onSignedOut}
-        onSucceeded={load}
-        targetId={status.target.id}
-      />
-
-      {!status.container.running ? (
-        <p className="models-notice">Start the Ollama container to read its model inventory or begin a new pull.</p>
-      ) : null}
-      {error ? <p className="error-box" role="alert">{error}</p> : null}
-      {busy && !inventory ? <p className="loading-box" role="status">Reading Ollama model inventory…</p> : null}
-
-      {inventory && summary ? (
-        <>
-          <div className="models-summary" aria-label="Model inventory summary">
-            <div><span>Installed</span><strong>{summary.installedCount}</strong><small>{formatBytes(summary.installedBytes)}</small></div>
-            <div><span>Loaded</span><strong>{summary.runningCount}</strong><small>{formatBytes(summary.runningVramBytes)} VRAM</small></div>
-            <div><span>Transport</span><strong>{inventory.transport.mode === 'published-binding' ? 'SSH → host binding' : 'SSH → container network'}</strong><small>Ollama API</small></div>
-          </div>
-
-          <div className="models-section-heading">
+      {surface === 'models' ? (
+        <section className="models-panel" aria-labelledby="models-title">
+          <div className="models-heading">
             <div>
-              <h3>Installed models</h3>
-              <p className="muted">Equivalent to the read-only inventory behind <code>ollama ls</code>.</p>
+              <p className="eyebrow">Ollama API over pinned SSH</p>
+              <h2 id="models-title">Models</h2>
+              <p className="muted">
+                Inventory and details stay server-authoritative. Model pulls and unloads use fixed Ollama API operations with remote verification. Port 11434 remains private.
+              </p>
             </div>
+            <button
+              className="secondary-button"
+              disabled={disabled || busy || !status.container.running}
+              onClick={() => void load()}
+              type="button"
+            >
+              {busy ? 'Refreshing…' : 'Refresh models'}
+            </button>
           </div>
 
-          {inventory.installed.length === 0 ? (
-            <p className="models-notice">No installed models reported by Ollama.</p>
-          ) : (
-            <div className="model-table-wrap">
-              <table className="model-table">
-                <thead>
-                  <tr>
-                    <th>Model</th>
-                    <th>Size</th>
-                    <th>Parameters</th>
-                    <th>Quantization</th>
-                    <th>Family</th>
-                    <th>Modified</th>
-                    <th>State</th>
-                    <th>Details</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {inventory.installed.map((model) => (
-                    <tr key={`${model.digest}:${model.model}`}>
-                      <td>
-                        <strong>{model.name}</strong>
-                        <code title={model.digest}>{model.digest.slice(0, 12)}…</code>
-                      </td>
-                      <td>{formatBytes(model.sizeBytes)}</td>
-                      <td>{display(model.details.parameterSize)}</td>
-                      <td>{display(model.details.quantizationLevel)}</td>
-                      <td>{display(model.details.family)}</td>
-                      <td>{model.modifiedAt ? formatTimestamp(model.modifiedAt) : 'Unavailable'}</td>
-                      <td>{loadedDigests.has(model.digest) ? <span className="model-loaded-badge">Loaded</span> : <span className="status-pill status-muted">Idle</span>}</td>
-                      <td>
-                        <button
-                          className="secondary-button model-detail-button"
-                          disabled={disabled || busy}
-                          onClick={() => setSelectedModel(model.model)}
-                          type="button"
-                        >
-                          {selectedModel === model.model ? 'Selected' : 'Details'}
-                        </button>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          )}
+          <ModelPullPanel
+            disabled={disabled || busy || !status.container.running}
+            onSignedOut={onSignedOut}
+            onSucceeded={load}
+            targetId={status.target.id}
+          />
 
-          {selectedModel ? (
-            <ModelDetailsPanel
-              disabled={disabled || busy}
-              key={`${status.target.id}:${status.target.selectedContainerId}:${status.container.startedAt ?? 'stopped'}:${selectedModel}`}
-              modelName={selectedModel}
-              onClose={() => setSelectedModel(null)}
-              onSignedOut={onSignedOut}
-              targetId={status.target.id}
-            />
+          {!status.container.running ? (
+            <p className="models-notice">Start the Ollama container to read its model inventory or begin a new pull.</p>
           ) : null}
+          {error ? <p className="error-box" role="alert">{error}</p> : null}
+          {busy && !inventory ? <p className="loading-box" role="status">Reading Ollama model inventory…</p> : null}
 
-          <div className="models-section-heading models-running-heading">
-            <div>
-              <h3>Loaded models</h3>
-              <p className="muted">Equivalent to the read-only inventory behind <code>ollama ps</code>. Unload uses a fixed <code>keep_alive: 0</code> operation and succeeds only after a fresh loaded-model check.</p>
-            </div>
-          </div>
-          {activeMutation ? (
-            <p className="models-notice" role="status">
-              Target mutation active: <strong>{activeMutation.kind}</strong> ({activeMutation.state}). Unload controls are disabled until the persistent target lock is released.
-            </p>
-          ) : null}
-          {inventory.running.length === 0 ? (
-            <p className="models-notice">No models are currently loaded in Ollama memory.</p>
-          ) : (
-            <div className="running-model-grid">
-              {inventory.running.map((model) => (
-                <RunningModelCard
-                  disabled={unloadDisabled}
-                  key={`${model.digest}:${model.model}`}
-                  model={model}
+          {inventory && summary ? (
+            <>
+              <div className="models-summary" aria-label="Model inventory summary">
+                <div><span>Installed</span><strong>{summary.installedCount}</strong><small>{formatBytes(summary.installedBytes)}</small></div>
+                <div><span>Loaded</span><strong>{summary.runningCount}</strong><small>{formatBytes(summary.runningVramBytes)} VRAM</small></div>
+                <div><span>Transport</span><strong>{inventory.transport.mode === 'published-binding' ? 'SSH → host binding' : 'SSH → container network'}</strong><small>Ollama API</small></div>
+              </div>
+
+              <div className="models-section-heading">
+                <div>
+                  <h3>Installed models</h3>
+                  <p className="muted">Equivalent to the read-only inventory behind <code>ollama ls</code>.</p>
+                </div>
+              </div>
+
+              {inventory.installed.length === 0 ? (
+                <p className="models-notice">No installed models reported by Ollama.</p>
+              ) : (
+                <div className="model-table-wrap">
+                  <table className="model-table">
+                    <thead>
+                      <tr>
+                        <th>Model</th>
+                        <th>Size</th>
+                        <th>Parameters</th>
+                        <th>Quantization</th>
+                        <th>Family</th>
+                        <th>Modified</th>
+                        <th>State</th>
+                        <th>Details</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {inventory.installed.map((model) => (
+                        <tr key={`${model.digest}:${model.model}`}>
+                          <td>
+                            <strong>{model.name}</strong>
+                            <code title={model.digest}>{model.digest.slice(0, 12)}…</code>
+                          </td>
+                          <td>{formatBytes(model.sizeBytes)}</td>
+                          <td>{display(model.details.parameterSize)}</td>
+                          <td>{display(model.details.quantizationLevel)}</td>
+                          <td>{display(model.details.family)}</td>
+                          <td>{model.modifiedAt ? formatTimestamp(model.modifiedAt) : 'Unavailable'}</td>
+                          <td>{loadedDigests.has(model.digest) ? <span className="model-loaded-badge">Loaded</span> : <span className="status-pill status-muted">Idle</span>}</td>
+                          <td>
+                            <button
+                              className="secondary-button model-detail-button"
+                              disabled={disabled || busy}
+                              onClick={() => setSelectedModel(model.model)}
+                              type="button"
+                            >
+                              {selectedModel === model.model ? 'Selected' : 'Details'}
+                            </button>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+
+              {selectedModel ? (
+                <ModelDetailsPanel
+                  disabled={disabled || busy}
+                  key={`${status.target.id}:${status.target.selectedContainerId}:${status.container.startedAt ?? 'stopped'}:${selectedModel}`}
+                  modelName={selectedModel}
+                  onClose={() => setSelectedModel(null)}
                   onSignedOut={onSignedOut}
-                  onUnloaded={refreshAfterUnload}
                   targetId={status.target.id}
-                  targetName={status.target.displayName}
                 />
-              ))}
+              ) : null}
+
+              <div className="models-section-heading models-running-heading">
+                <div>
+                  <h3>Loaded models</h3>
+                  <p className="muted">Equivalent to the read-only inventory behind <code>ollama ps</code>. Unload uses a fixed <code>keep_alive: 0</code> operation and succeeds only after a fresh loaded-model check.</p>
+                </div>
+              </div>
+              {activeMutation ? (
+                <p className="models-notice" role="status">
+                  Target mutation active: <strong>{activeMutation.kind}</strong> ({activeMutation.state}). Unload controls are disabled until the persistent target lock is released.
+                </p>
+              ) : null}
+              {inventory.running.length === 0 ? (
+                <p className="models-notice">No models are currently loaded in Ollama memory.</p>
+              ) : (
+                <div className="running-model-grid">
+                  {inventory.running.map((model) => (
+                    <RunningModelCard
+                      disabled={unloadDisabled}
+                      key={`${model.digest}:${model.model}`}
+                      model={model}
+                      onSignedOut={onSignedOut}
+                      onUnloaded={refreshAfterUnload}
+                      targetId={status.target.id}
+                      targetName={status.target.displayName}
+                    />
+                  ))}
+                </div>
+              )}
+            </>
+          ) : null}
+        </section>
+      ) : (
+        <section className="models-panel modelfiles-surface" aria-labelledby="modelfiles-surface-title">
+          <div className="models-heading">
+            <div>
+              <p className="eyebrow">First-class versioned artifacts</p>
+              <h2 id="modelfiles-surface-title">Modelfiles</h2>
+              <p className="muted">
+                Create, import, edit, validate, diff, clone, export and deploy immutable Modelfile revisions. Local library work remains available even when Ollama is stopped; remote import/deploy actions stay disabled until the target is available.
+              </p>
             </div>
-          )}
+          </div>
 
           <LocalModelfilesWorkspace
-            disabled={disabled || busy}
-            inventory={inventory}
+            disabled={disabled}
+            inventory={inventory ?? EMPTY_INVENTORY}
             onSignedOut={onSignedOut}
             status={status}
           />
-        </>
-      ) : null}
-    </section>
+
+          <ModelfilePortabilityPanel disabled={disabled} onSignedOut={onSignedOut} />
+
+          <ModelCreatePanel
+            disabled={disabled || busy || !status.container.running}
+            onSignedOut={onSignedOut}
+            onSucceeded={load}
+            targetId={status.target.id}
+          />
+        </section>
+      )}
+    </div>
   );
 }
