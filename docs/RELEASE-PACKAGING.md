@@ -32,7 +32,8 @@ The packaging step:
 6. injects only non-sensitive OCI metadata:
    - `org.opencontainers.image.version`;
    - `org.opencontainers.image.revision`;
-7. verifies the labels and image identity before writing release evidence.
+7. verifies the labels and image identity before writing release evidence;
+8. derives the third-party dependency license inventory from the same locked `package-lock.json` without a network metadata lookup.
 
 The normal production-container gate may continue to test the moving supported Node 24 base with `--pull`. Release packaging records the exact base identity actually used by the candidate, so later verification does not pretend that a mutable tag alone is reproducible evidence.
 
@@ -42,6 +43,7 @@ The bounded workflow artifact contains:
 
 ```text
 release-manifest.json
+third-party-licenses.json
 version.json
 Dockerfile
 compose.yaml
@@ -58,7 +60,12 @@ SHA256SUMS
 - immutable base-image reference and image ID;
 - resulting production image reference and image ID;
 - OCI version/revision labels;
-- all eight private workspace identities and their internal package versions.
+- all eight private workspace identities and their internal package versions;
+- third-party package count, exact license-expression counts and the SHA-256 of `third-party-licenses.json`.
+
+`third-party-licenses.json` is a deterministic inventory of the unique locked third-party package name/version/license metadata present in `package-lock.json`. Local `@orc/*` workspace links are excluded. Missing or blank license metadata fails the release-package step closed instead of being interpreted as permissive.
+
+The inventory is **factual dependency metadata only**. It is not legal advice, does not decide compatibility with a future project license and is not itself a license grant. Issue #145 remains the explicit owner-level project-license decision.
 
 The bundle contains no `/data`, master key, SSH credential, local secret file, database or Docker image tarball. The implementation PR establishes deterministic metadata/evidence; publishing a registry image or public release is a separate release action.
 
@@ -70,9 +77,10 @@ After downloading the exact candidate artifact:
 cd release-package
 sha256sum -c SHA256SUMS
 jq . release-manifest.json
+jq . third-party-licenses.json
 ```
 
-Verify that `releaseVersion` is the intended beta version and `commitSha` is the exact accepted candidate. The `inputs.packageLockSha256`, Docker/Compose hashes, base-image identity and resulting image ID are evidence for the build that produced the artifact.
+Verify that `releaseVersion` is the intended beta version and `commitSha` is the exact accepted candidate. The `inputs.packageLockSha256`, Docker/Compose hashes, base-image identity and resulting image ID are evidence for the build that produced the artifact. The same package-lock SHA-256 must appear in `third-party-licenses.json`, and the inventory checksum must match `release-manifest.json`/`SHA256SUMS`.
 
 For a locally available candidate image, additionally verify:
 
@@ -100,7 +108,15 @@ npm run release:package -- \
   --base-image-id sha256:<64-hex>
 ```
 
-It refuses an unclean Git worktree, malformed commit/image identities, toolchain drift, package/lock mismatches or missing workspace synchronization.
+It refuses an unclean Git worktree, malformed commit/image identities, toolchain drift, package/lock mismatches, missing workspace synchronization or missing locked third-party license metadata.
+
+For a standalone factual inventory from a reviewed lockfile:
+
+```bash
+node scripts/third-party-license-inventory.mjs /tmp/third-party-licenses.json
+```
+
+This command reads the local lockfile only; it does not contact package registries or licensing services.
 
 ## Public release boundary
 
