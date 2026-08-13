@@ -4,9 +4,9 @@ Web-GUI zur sicheren Remote-Administration von Ollama auf Linux-Hosts über SSH 
 
 ## Status
 
-**0.1 Beta Candidate – noch nicht für eine öffentliche Beta freigegeben.**
+**0.1 Beta Candidate – technisch release-ready; vor öffentlicher Beta fehlt nur noch die verpflichtende GitHub-Repository-Policy.**
 
-Der funktionale Beta-Pfad ist weitgehend vollständig und wird auf Pull-Request-Merge-Refs durch Build-, Produkt-, Compatibility-, Production-Container- und exakte Release-Candidate-Evidence geprüft. Implementiert sind unter anderem:
+Der funktionale Beta-Pfad ist vollständig und wird auf Pull-Request-Merge-Refs durch Build-, Produkt-, Compatibility-, Production-Container- und exakte Release-Candidate-Evidence geprüft. Implementiert sind unter anderem:
 
 - lokale Admin-Authentifizierung, serverseitige Sessions und CSRF-Schutz;
 - verschlüsselte SSH-Credentials mit externem Master-Key sowie TOFU/Host-Key-Pinning;
@@ -19,9 +19,9 @@ Der funktionale Beta-Pfad ist weitgehend vollständig und wird auf Pull-Request-
 - Audit-Historie, JSON/CSV-Export und Retention;
 - `/data`-Backup/Restore, Mutation-Failure/Recovery-Matrix und exakte Release-Candidate-Szenarien;
 - bounded Accessibility-/Responsive-Hardening mit dokumentierten manuellen Restchecks;
-- eine autoritative 0.1-Beta-Release-Version und ein exakt SHA-/Lock-/Image-gebundenes, gechecksummtes Release-Evidence-Paket.
+- eine autoritative 0.1-Beta-Release-Version und ein exakt SHA-/Lock-/Image-/Lizenz-gebundenes, gechecksummtes Release-Evidence-Paket.
 
-Vor der **öffentlichen** Beta bleiben insbesondere die tatsächlich verpflichtende GitHub-Repository-Policy für `beta-acceptance` sowie die explizite Projekt-Lizenzentscheidung offen. Siehe Issue `#84`.
+Vor der **öffentlichen** Beta bleibt nur noch die tatsächlich verpflichtende GitHub-Repository-Policy für `beta-acceptance` offen. Siehe Issue `#105` und den Release-Tracker `#84`.
 
 Für die 0.1-Beta sind **Expert Mode** und **Model Delete** normativ auf post-beta verschoben. Standalone-Ollama-Targets bleiben für normale Administration unterstützt; die Update-Ausführung ist für 0.1 Beta bewusst fail-closed und nur für positiv validierte Docker-Compose-Targets freigeschaltet.
 
@@ -49,7 +49,7 @@ Für die 0.1-Beta sind **Expert Mode** und **Model Delete** normativ auf post-be
 - [`docs/BETA-RC-SCENARIOS.md`](docs/BETA-RC-SCENARIOS.md) – exakte Release-Candidate-Szenario-Evidence
 - [`docs/BETA-FAILURE-RECOVERY-MATRIX.md`](docs/BETA-FAILURE-RECOVERY-MATRIX.md) – Mutation-/Restart-Recovery-Abdeckung
 - [`docs/BETA-ACCESSIBILITY-RESPONSIVE.md`](docs/BETA-ACCESSIBILITY-RESPONSIVE.md) – Accessibility-/Responsive-Scope und manuelle Restchecks
-- [`docs/RELEASE-PACKAGING.md`](docs/RELEASE-PACKAGING.md) – autoritative Beta-Version, exakte Build-Identität und Artifact-Verifikation
+- [`docs/RELEASE-PACKAGING.md`](docs/RELEASE-PACKAGING.md) – autoritative Beta-Version, exakte Build-Identität, Projektlizenz und Artifact-Verifikation
 - [`docs/adr/`](docs/adr/) – Architecture Decision Records
 
 ## Entwicklung
@@ -95,7 +95,7 @@ Ein Beta-Release-Kandidat ist nur akzeptiert, wenn für denselben getesteten SHA
 3. `beta-acceptance`;
 4. `beta-release-candidate`.
 
-`beta-release-candidate` erstellt zusätzlich ein begrenztes Release-Paket für den getesteten SHA. Es bindet die öffentliche Version aus `release/version.json`, den Lockfile-Hash, die exakte Node/npm-Toolchain, den aufgelösten Base-Image-Digest, die resultierende Image-ID und OCI-Version/Revision. Das Paket enthält keine `/data`- oder Secret-Inhalte; Verifikation und Reproduktion sind in [`docs/RELEASE-PACKAGING.md`](docs/RELEASE-PACKAGING.md) beschrieben.
+`beta-release-candidate` erstellt zusätzlich ein begrenztes Release-Paket für den getesteten SHA. Es bindet die öffentliche Version aus `release/version.json`, die Projektlizenz und ihren LICENSE-Hash, den Lockfile-Hash, die exakte Node/npm-Toolchain, den aufgelösten Base-Image-Digest, die resultierende Image-ID und OCI-Version/Revision/Lizenz. Das Paket enthält keine `/data`- oder Secret-Inhalte; Verifikation und Reproduktion sind in [`docs/RELEASE-PACKAGING.md`](docs/RELEASE-PACKAGING.md) beschrieben.
 
 Der Workflow allein macht `beta-acceptance` noch nicht zu einer verpflichtenden Merge-Regel. Die `main`-Repository-Policy muss diesen Check zusätzlich als required konfigurieren und mit einem absichtlich roten Kandidaten verifiziert werden.
 
@@ -103,7 +103,6 @@ Der Workflow allein macht `beta-acceptance` noch nicht zu einer verpflichtenden 
 
 ### Bis öffentliche 0.1 Beta
 
-- explizite Projekt-Lizenzentscheidung (`#145`);
 - verpflichtende Repository-Policy für `beta-acceptance` verifizieren (`#105`).
 
 ### Post-beta
@@ -115,4 +114,4 @@ Der Workflow allein macht `beta-acceptance` noch nicht zu einer verpflichtenden 
 
 ## Lizenz
 
-Noch nicht festgelegt. Die öffentliche Repository-Sichtbarkeit wird **nicht** als Lizenzgrant interpretiert. Auswahl und Anwendung einer Projektlizenz sind vor öffentlicher Beta separat in `#145` zu entscheiden.
+Ollama Remote Control wird unter der **Apache License 2.0** veröffentlicht. Der vollständige Projekt-Lizenztext steht in [`LICENSE`](LICENSE). Drittanbieter-Abhängigkeiten behalten ihre jeweiligen Lizenzen; die exakt zum Release-Lockfile gehörige Lizenzinventur ist Bestandteil des gechecksummten Release-Evidence-Pakets.
