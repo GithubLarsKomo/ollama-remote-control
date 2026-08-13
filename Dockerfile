@@ -7,7 +7,7 @@ RUN apt-get update \
     && apt-get install -y --no-install-recommends python3 make g++ \
     && rm -rf /var/lib/apt/lists/*
 
-COPY package.json package-lock.json tsconfig.base.json ./
+COPY package.json package-lock.json tsconfig.base.json LICENSE ./
 COPY release/version.json ./release/version.json
 COPY apps/api/package.json ./apps/api/package.json
 COPY apps/web/package.json ./apps/web/package.json
@@ -35,7 +35,8 @@ ARG ORC_COMMIT_SHA=unknown
 
 LABEL org.opencontainers.image.title="Ollama Remote Control" \
       org.opencontainers.image.version="${ORC_VERSION}" \
-      org.opencontainers.image.revision="${ORC_COMMIT_SHA}"
+      org.opencontainers.image.revision="${ORC_COMMIT_SHA}" \
+      org.opencontainers.image.licenses="Apache-2.0"
 
 WORKDIR /app
 
@@ -51,7 +52,7 @@ RUN mkdir -p /data \
     && chown node:node /data
 
 COPY --from=build --chown=node:node /app/node_modules ./node_modules
-COPY --from=build --chown=node:node /app/package.json /app/package-lock.json ./
+COPY --from=build --chown=node:node /app/package.json /app/package-lock.json /app/LICENSE ./
 COPY --from=build --chown=node:node /app/release/version.json ./release/version.json
 COPY --from=build --chown=node:node /app/scripts/orc-data-backup.mjs ./scripts/orc-data-backup.mjs
 

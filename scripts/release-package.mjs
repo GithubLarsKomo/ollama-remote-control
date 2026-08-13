@@ -9,6 +9,7 @@ const ROOT = resolve(import.meta.dirname, '..');
 const SHA256 = /^[a-f0-9]{40}$/u;
 const IMAGE_ID = /^sha256:[a-f0-9]{64}$/u;
 const RELEASE_VERSION = /^0\.1\.0-beta\.[1-9][0-9]*$/u;
+const PROJECT_LICENSE = 'Apache-2.0';
 
 function sha256(value) {
   return createHash('sha256').update(value).digest('hex');
@@ -87,6 +88,7 @@ export function buildReleaseManifest(input) {
   if (!RELEASE_VERSION.test(release.version)) fail('release/version.json contains an invalid 0.1 beta version.');
   if (!/^24\.[0-9]+\.[0-9]+$/u.test(release.nodeVersion)) fail('release nodeVersion must pin Node 24 exactly.');
   if (!/^[0-9]+\.[0-9]+\.[0-9]+$/u.test(release.npmVersion)) fail('release npmVersion must be exact.');
+  if (release.license !== PROJECT_LICENSE) fail(`release license must be ${PROJECT_LICENSE}.`);
   if (!SHA256.test(input.commitSha)) fail('Release commit SHA must be an exact lowercase 40-character Git SHA.');
   if (!IMAGE_ID.test(input.imageId) || !IMAGE_ID.test(input.baseImageId)) fail('Docker image identities must be sha256 IDs.');
 
@@ -96,6 +98,9 @@ export function buildReleaseManifest(input) {
     fail('Root package metadata does not match package-lock.json.');
   }
   if (rootPackage.packageManager !== `npm@${release.npmVersion}`) fail('Root packageManager does not match release npmVersion.');
+  if (rootPackage.license !== release.license) fail('Root package license does not match authoritative release license.');
+  const projectLicensePath = join(ROOT, 'LICENSE');
+  const projectLicenseSha256 = sha256File(projectLicensePath);
   const workspaces = workspaceRecords(lock);
   assertInternalDependencyLock(workspaces);
 
@@ -108,6 +113,10 @@ export function buildReleaseManifest(input) {
     product: 'ollama-remote-control',
     releaseVersion: release.version,
     commitSha: input.commitSha,
+    projectLicense: {
+      spdx: release.license,
+      licenseSha256: projectLicenseSha256,
+    },
     toolchain: {
       node: release.nodeVersion,
       npm: release.npmVersion,
@@ -126,6 +135,7 @@ export function buildReleaseManifest(input) {
       labels: {
         version: release.version,
         revision: input.commitSha,
+        licenses: release.license,
       },
     },
     workspaces: workspaces.map((workspace) => ({
@@ -162,19 +172,25 @@ export function writeReleaseBundle(input) {
   mkdirSync(outDir, { recursive: true });
 
   const manifestPath = join(outDir, 'release-manifest.json');
-  const licensePath = join(outDir, 'third-party-licenses.json');
+  const thirdPartyLicensePath = join(outDir, 'third-party-licenses.json');
   const evidencePath = join(outDir, 'third-party-license-evidence.json');
+  const projectLicensePath = join(outDir, 'LICENSE');
   const dockerfilePath = join(outDir, 'Dockerfile');
   const composePath = join(outDir, 'compose.yaml');
   const versionPath = join(outDir, 'version.json');
   writeFileSync(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`, { mode: 0o644 });
-  writeFileSync(licensePath, licenseContent, { mode: 0o644 });
+  writeFileSync(thirdPartyLicensePath, licenseContent, { mode: 0o644 });
   writeFileSync(evidencePath, evidenceText, { mode: 0o644 });
+  cpSync(join(ROOT, 'LICENSE'), projectLicensePath);
   cpSync(join(ROOT, 'Dockerfile'), dockerfilePath);
   cpSync(join(ROOT, 'compose.yaml'), composePath);
   cpSync(join(ROOT, 'release', 'version.json'), versionPath);
 
-  const checksumTargets = [manifestPath, licensePath, evidencePath, dockerfilePath, composePath, versionPath];
+  if (sha256File(projectLicensePath) !== manifest.projectLicense.licenseSha256) {
+    fail('Release bundle project LICENSE hash does not match release manifest authority.');
+  }
+
+  const checksumTargets = [manifestPath, thirdPartyLicensePath, evidencePath, projectLicensePath, dockerfilePath, composePath, versionPath];
   const sums = checksumTargets
     .map((path) => `${sha256File(path)}  ${basename(path)}`)
     .sort()
@@ -196,7 +212,7 @@ function main() {
     baseImageReference: args['base-image-reference'],
     baseImageId: args['base-image-id'],
   });
-  process.stdout.write(`${JSON.stringify({ releaseVersion: manifest.releaseVersion, commitSha: manifest.commitSha, imageId: manifest.image.id, thirdPartyPackageCount: manifest.thirdPartyLicenses.packageCount, reviewedEvidenceCount: manifest.thirdPartyLicenses.reviewedEvidenceCount })}\n`);
+  process.stdout.write(`${JSON.stringify({ releaseVersion: manifest.releaseVersion, commitSha: manifest.commitSha, imageId: manifest.image.id, projectLicense: manifest.projectLicense.spdx, thirdPartyPackageCount: manifest.thirdPartyLicenses.packageCount, reviewedEvidenceCount: manifest.thirdPartyLicenses.reviewedEvidenceCount })}\n`);
 }
 
 if (process.argv[1] && resolve(process.argv[1]) === resolve(import.meta.filename)) main();

@@ -27,10 +27,14 @@ jobs:
           version="$(jq -er '.version' release/version.json)"
           node_version="$(jq -er '.nodeVersion' release/version.json)"
           npm_version="$(jq -er '.npmVersion' release/version.json)"
+          license="$(jq -er '.license' release/version.json)"
           [[ "$version" =~ ^0\.1\.0-beta\.[1-9][0-9]*$ ]]
           [[ "$node_version" =~ ^24\.[0-9]+\.[0-9]+$ ]]
           [[ "$npm_version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]
-          printf 'version=%s\nnode_version=%s\nnpm_version=%s\n' "$version" "$node_version" "$npm_version" >> "$GITHUB_OUTPUT"
+          test "$license" = 'Apache-2.0'
+          test "$(jq -er '.license' package.json)" = "$license"
+          test -s LICENSE
+          printf 'version=%s\nnode_version=%s\nnpm_version=%s\nlicense=%s\n' "$version" "$node_version" "$npm_version" "$license" >> "$GITHUB_OUTPUT"
 
       - name: Set up exact release Node
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
@@ -196,6 +200,7 @@ jobs:
         env:
           TESTED_SHA: ${{ steps.identity.outputs.tested_sha }}
           RELEASE_VERSION: ${{ steps.release.outputs.version }}
+          PROJECT_LICENSE: ${{ steps.release.outputs.license }}
           NPM_VERSION: ${{ steps.release.outputs.npm_version }}
           NODE_VERSION: ${{ steps.release.outputs.node_version }}
         run: |
@@ -223,7 +228,9 @@ jobs:
           [[ "$image_id" =~ ^sha256:[a-f0-9]{64}$ ]]
           test "$(docker image inspect -f '{{ index .Config.Labels "org.opencontainers.image.version" }}' "$image_ref")" = "$RELEASE_VERSION"
           test "$(docker image inspect -f '{{ index .Config.Labels "org.opencontainers.image.revision" }}' "$image_ref")" = "$TESTED_SHA"
+          test "$(docker image inspect -f '{{ index .Config.Labels "org.opencontainers.image.licenses" }}' "$image_ref")" = "$PROJECT_LICENSE"
           test "$(docker run --rm --entrypoint node "$image_ref" --version)" = "v${NODE_VERSION}"
+          docker run --rm --entrypoint sh "$image_ref" -c 'test -s /app/LICENSE && grep -q "Apache License" /app/LICENSE'
 
           out="$RUNNER_TEMP/release-package"
           npm run release:package -- \
@@ -234,15 +241,21 @@ jobs:
             --base-image-reference "$base_ref" \
             --base-image-id "$base_id"
           (cd "$out" && sha256sum -c SHA256SUMS)
+          license_sha="$(sha256sum "$out/LICENSE" | awk '{print $1}')"
           jq -e \
             --arg version "$RELEASE_VERSION" \
             --arg sha "$TESTED_SHA" \
             --arg image "$image_id" \
             --arg base "$base_ref" \
+            --arg license "$PROJECT_LICENSE" \
+            --arg license_sha "$license_sha" \
             '.schemaVersion == 1
              and .releaseVersion == $version
              and .commitSha == $sha
+             and .projectLicense.spdx == $license
+             and .projectLicense.licenseSha256 == $license_sha
              and .image.id == $image
+             and .image.labels.licenses == $license
              and .inputs.baseImageReference == $base
              and (.workspaces | length == 8)
              and ([.workspaces[].releaseVersion] | all(. == $version))' \
