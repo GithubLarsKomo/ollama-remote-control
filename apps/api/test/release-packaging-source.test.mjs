@@ -12,20 +12,30 @@ function json(path) {
   return JSON.parse(text(path));
 }
 
-test('release version and toolchain have one explicit authoritative source', () => {
+test('release version, toolchain and project license have one explicit authoritative source', () => {
   const release = json('release/version.json');
   const rootPackage = json('package.json');
 
   assert.match(release.version, /^0\.1\.0-beta\.[1-9][0-9]*$/u);
   assert.match(release.nodeVersion, /^24\.[0-9]+\.[0-9]+$/u);
   assert.match(release.npmVersion, /^[0-9]+\.[0-9]+\.[0-9]+$/u);
+  assert.equal(release.license, 'Apache-2.0');
+  assert.equal(rootPackage.license, release.license);
   assert.equal(rootPackage.packageManager, `npm@${release.npmVersion}`);
   assert.equal(rootPackage.scripts['release:package'], 'node scripts/release-package.mjs');
+
+  const projectLicense = text('LICENSE');
+  assert.match(projectLicense, /Apache License\s+Version 2\.0, January 2004/u);
+  assert.match(projectLicense, /END OF TERMS AND CONDITIONS/u);
 });
 
-test('release packaging binds exact source, lock, workspaces, Docker and third-party license identities', () => {
+test('release packaging binds exact source, lock, project license, workspaces, Docker and third-party license identities', () => {
   const source = text('scripts/release-package.mjs');
   for (const marker of [
+    'PROJECT_LICENSE',
+    'projectLicense',
+    'licenseSha256',
+    "cpSync(join(ROOT, 'LICENSE'), projectLicensePath)",
     'packageLockSha256',
     'dockerfileSha256',
     'composeSha256',
@@ -83,12 +93,14 @@ test('reviewed missing-lock license evidence is exact-version and immutable-sour
   });
 });
 
-test('production image accepts immutable base and exposes non-sensitive release labels', () => {
+test('production image accepts immutable base and exposes non-sensitive release and license labels', () => {
   const dockerfile = text('Dockerfile');
   assert.ok(dockerfile.includes('ARG NODE_IMAGE=node:24-bookworm-slim'));
   assert.equal((dockerfile.match(/FROM \$\{NODE_IMAGE\}/gu) ?? []).length, 2);
   assert.ok(dockerfile.includes('org.opencontainers.image.version="${ORC_VERSION}"'));
   assert.ok(dockerfile.includes('org.opencontainers.image.revision="${ORC_COMMIT_SHA}"'));
+  assert.ok(dockerfile.includes('org.opencontainers.image.licenses="Apache-2.0"'));
+  assert.ok(dockerfile.includes('/app/LICENSE'));
   assert.ok(dockerfile.includes('ORC_RELEASE_VERSION=${ORC_VERSION}'));
   assert.ok(dockerfile.includes('ORC_COMMIT_SHA=${ORC_COMMIT_SHA}'));
   assert.ok(dockerfile.includes('/app/release/version.json'));
@@ -116,11 +128,13 @@ test('beta release candidate fails closed through locked exact-SHA packaging', (
   assert.ok(workflow.includes('production-container'));
 });
 
-test('release documentation keeps package and license evidence bounded and separate from a project grant', () => {
+test('release documentation keeps project grant and third-party license evidence explicit and separate', () => {
   const docs = text('docs/RELEASE-PACKAGING.md');
   assert.match(docs, /exact tested Git SHA/i);
   assert.match(docs, /package-lock SHA-256/i);
   assert.match(docs, /immutable base-image reference/i);
+  assert.match(docs, /Apache-2\.0/i);
+  assert.match(docs, /project `LICENSE`/i);
   assert.match(docs, /third-party-licenses\.json/i);
   assert.match(docs, /third-party-license-evidence\.json/i);
   assert.match(docs, /exact reviewed evidence/i);
@@ -128,5 +142,4 @@ test('release documentation keeps package and license evidence bounded and separ
   assert.match(docs, /not legal advice/i);
   assert.match(docs, /contains no `\/data`, master key, SSH credential/i);
   assert.match(docs, /publishing a registry image or public release is a separate release action/i);
-  assert.match(docs, /project license decision/i);
 });
