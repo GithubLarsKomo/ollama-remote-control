@@ -1,0 +1,27 @@
+{
+  "name": "Ollama Remote Control",
+  "short_name": "Ollama Remote",
+  "description": "Secure remote operations dashboard for Ollama.",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#09110f",
+  "theme_color": "#09110f",
+  "icons": [
+    {
+      "src": "/brand/app-icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png"
+    },
+    {
+      "src": "/brand/app-icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png"
+    },
+    {
+      "src": "/brand/ollama-remote-mark.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    }
+  ]
+}
