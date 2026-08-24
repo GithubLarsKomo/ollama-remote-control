@@ -1,8 +1,10 @@
 import assert from 'node:assert/strict';
+import fs from 'node:fs';
 import test from 'node:test';
 import {
   httpGetViaPinnedSsh,
   httpPostOllamaShowViaPinnedSsh,
+  parseHttpResponse,
   SshHttpError,
 } from '../dist/ssh-http.js';
 
@@ -56,4 +58,24 @@ test('SSH HTTP show primitive rejects model-name injection before opening SSH', 
       (error) => error instanceof SshHttpError && error.code === 'HTTP_REQUEST_INVALID',
     );
   }
+});
+
+test('SSH HTTP response parser accepts a realistic large chunked Ollama tags response', () => {
+  const payload = Buffer.from(JSON.stringify({ models: [{ name: 'x'.repeat(131_000) }] }), 'utf8');
+  const raw = Buffer.concat([
+    Buffer.from('HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nTransfer-Encoding: chunked\r\nConnection: close\r\n\r\n', 'ascii'),
+    Buffer.from(`${payload.length.toString(16)}\r\n`, 'ascii'),
+    payload,
+    Buffer.from('\r\n0\r\n\r\n', 'ascii'),
+  ]);
+  const response = parseHttpResponse(raw, 1024 * 1024);
+  assert.equal(response.statusCode, 200);
+  assert.deepEqual(response.body, payload);
+});
+
+test('SSH HTTP adapter does not half-close direct-tcpip after sending an HTTP request', () => {
+  const source = fs.readFileSync(new URL('../src/ssh-http.ts', import.meta.url), 'utf8');
+  assert.match(source, /stream\.write\(payload\)/u);
+  assert.doesNotMatch(source, /stream\.end\(request\.body/u);
+  assert.match(source, /Connection: close/u);
 });
