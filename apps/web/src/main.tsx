@@ -4,6 +4,7 @@ import App from './App.js';
 import './styles.css';
 import './models-navigation.css';
 import './accessibility-responsive.css';
+import './impeccable-polish.css';
 
 const root = document.getElementById('root');
 if (!root) throw new Error('Web application root element is missing.');
