@@ -2,7 +2,11 @@ import { createHash } from 'node:crypto';
 import * as http from 'node:http';
 import type { ClientChannel } from 'ssh2';
 import { Client } from 'ssh2';
-import type { SshPrivateKeyConnection } from '@orc/ssh';
+import {
+  execPrivateKey,
+  SshTransportError,
+  type SshPrivateKeyConnection,
+} from '@orc/ssh';
 
 export type SshHttpErrorCode =
   | 'SSH_HOST_KEY_MISMATCH'
@@ -34,6 +38,7 @@ export type OllamaReadPath = '/api/version' | '/api/tags' | '/api/ps';
 const OLLAMA_READ_PATHS = new Set<string>(['/api/version', '/api/tags', '/api/ps']);
 const MAX_OLLAMA_MODEL_NAME = 512;
 const MAX_HTTP_RESPONSE_BYTES = 4 * 1024 * 1024;
+const CURL_STATUS_MARKER = '\n__ORC_HTTP_STATUS__:';
 
 interface FixedHttpRequest {
   readonly method: 'GET' | 'POST';
@@ -216,9 +221,6 @@ function httpRequestViaConnectedSsh(
         clearTimeout(timer);
         resolve(completedResponse ?? response);
       });
-      // The HTTP response is complete. Gracefully close the direct-tcpip channel
-      // and wait for ssh2's close acknowledgement before opening another one.
-      // Using destroy() here races the next forwardOut() on real OpenSSH hosts.
       try { activeChannel.end(); } catch { fail(new SshHttpError('SSH_FORWARD_FAILED', 'SSH forwarded TCP stream could not close cleanly.')); }
     };
 
@@ -310,6 +312,65 @@ async function httpRequestViaPinnedSsh(
   }
 }
 
+function curlUrl(destinationHost: string, destinationPort: number, path: string): string {
+  const host = destinationHost.includes(':') ? `[${destinationHost}]` : destinationHost;
+  return `http://${host}:${destinationPort}${path}`;
+}
+
+async function httpRequestViaPinnedExec(
+  connection: SshPrivateKeyConnection,
+  destinationHost: string,
+  destinationPort: number,
+  request: FixedHttpRequest,
+  options: SshHttpOptions,
+): Promise<SshHttpResponse> {
+  const timeoutMs = options.timeoutMs ?? 5_000;
+  const maxResponseBytes = options.maxResponseBytes ?? 64 * 1024;
+  validateDestination(destinationHost, destinationPort, timeoutMs, maxResponseBytes);
+  const argv = [
+    'curl', '--noproxy', '*', '--silent', '--show-error',
+    '--max-time', String(Math.max(1, Math.ceil(timeoutMs / 1000))),
+    '--output', '-', '--write-out', `${CURL_STATUS_MARKER}%{http_code}`,
+  ];
+  if (request.method === 'POST') {
+    argv.push('--request', 'POST', '--header', `Content-Type: ${request.contentType ?? 'application/json'}`, '--data-binary', '@-');
+  }
+  argv.push(curlUrl(destinationHost, destinationPort, request.path));
+
+  let result;
+  try {
+    result = await execPrivateKey(connection, argv, {
+      timeoutMs: timeoutMs + 1_000,
+      maxOutputBytes: maxResponseBytes + 1024,
+      stdin: request.body?.toString('utf8'),
+      maxInputBytes: maxResponseBytes,
+    });
+  } catch (error) {
+    if (error instanceof SshTransportError && error.code === 'SSH_HOST_KEY_MISMATCH') {
+      throw new SshHttpError('SSH_HOST_KEY_MISMATCH', 'SSH host-key verification failed.', { cause: error });
+    }
+    if (error instanceof SshTransportError && (error.code === 'SSH_CONNECT_FAILED' || error.code === 'AUTH_FAILED')) {
+      throw new SshHttpError('SSH_CONNECT_FAILED', 'SSH exec fallback could not connect.', { cause: error });
+    }
+    throw new SshHttpError('SSH_FORWARD_FAILED', 'SSH exec HTTP fallback failed.', { cause: error as Error });
+  }
+  if (result.exitCode !== 0) {
+    throw new SshHttpError('SSH_FORWARD_FAILED', 'SSH exec HTTP fallback returned a non-zero exit code.');
+  }
+  const markerIndex = result.stdout.lastIndexOf(CURL_STATUS_MARKER);
+  if (markerIndex < 0) throw new SshHttpError('HTTP_RESPONSE_INVALID', 'SSH exec HTTP fallback returned no status marker.');
+  const statusText = result.stdout.slice(markerIndex + CURL_STATUS_MARKER.length).trim();
+  if (!/^\d{3}$/u.test(statusText)) throw new SshHttpError('HTTP_RESPONSE_INVALID', 'SSH exec HTTP fallback returned an invalid status.');
+  const body = Buffer.from(result.stdout.slice(0, markerIndex), 'utf8');
+  if (body.length > maxResponseBytes) throw new SshHttpError('HTTP_RESPONSE_TOO_LARGE', 'HTTP response exceeded the configured size limit.');
+  return { statusCode: Number(statusText), headers: {}, body };
+}
+
+function shouldFallbackToExec(error: unknown): error is SshHttpError {
+  return error instanceof SshHttpError
+    && (error.code === 'SSH_FORWARD_FAILED' || error.code === 'HTTP_TIMEOUT');
+}
+
 export async function httpGetManyViaPinnedSsh(
   connection: SshPrivateKeyConnection,
   destinationHost: string,
@@ -349,14 +410,16 @@ export async function httpGetViaPinnedSsh(
   requestPath: OllamaReadPath,
   options: SshHttpOptions = {},
 ): Promise<SshHttpResponse> {
-  const [response] = await httpGetManyViaPinnedSsh(
-    connection,
-    destinationHost,
-    destinationPort,
-    [requestPath],
-    options,
-  );
-  return response;
+  if (!OLLAMA_READ_PATHS.has(requestPath)) {
+    throw new SshHttpError('HTTP_REQUEST_INVALID', 'Ollama HTTP request path is not allowed.');
+  }
+  const request: FixedHttpRequest = { method: 'GET', path: requestPath };
+  try {
+    return await httpRequestViaPinnedSsh(connection, destinationHost, destinationPort, request, options);
+  } catch (error) {
+    if (!shouldFallbackToExec(error)) throw error;
+    return httpRequestViaPinnedExec(connection, destinationHost, destinationPort, request, options);
+  }
 }
 
 export async function httpPostOllamaShowViaPinnedSsh(
@@ -375,11 +438,11 @@ export async function httpPostOllamaShowViaPinnedSsh(
     throw new SshHttpError('HTTP_REQUEST_INVALID', 'Ollama model name is invalid.');
   }
   const body = Buffer.from(JSON.stringify({ model: modelName, verbose: false }), 'utf8');
-  return httpRequestViaPinnedSsh(
-    connection,
-    destinationHost,
-    destinationPort,
-    { method: 'POST', path: '/api/show', body, contentType: 'application/json' },
-    options,
-  );
+  const request: FixedHttpRequest = { method: 'POST', path: '/api/show', body, contentType: 'application/json' };
+  try {
+    return await httpRequestViaPinnedSsh(connection, destinationHost, destinationPort, request, options);
+  } catch (error) {
+    if (!shouldFallbackToExec(error)) throw error;
+    return httpRequestViaPinnedExec(connection, destinationHost, destinationPort, request, options);
+  }
 }
