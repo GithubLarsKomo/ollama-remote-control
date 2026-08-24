@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto';
+import * as http from 'node:http';
 import type { ClientChannel } from 'ssh2';
 import { Client } from 'ssh2';
 import type { SshPrivateKeyConnection } from '@orc/ssh';
@@ -105,6 +106,15 @@ export function parseHttpResponse(raw: Buffer, maxBodyBytes: number): SshHttpRes
   return { statusCode: Number(statusMatch[1]), headers, body };
 }
 
+function normalizeResponseHeaders(headers: http.IncomingHttpHeaders): Record<string, string> {
+  const normalized: Record<string, string> = {};
+  for (const [name, value] of Object.entries(headers)) {
+    if (value === undefined) continue;
+    normalized[name.toLowerCase()] = Array.isArray(value) ? value.join(', ') : String(value);
+  }
+  return normalized;
+}
+
 function validateDestination(destinationHost: string, destinationPort: number, timeoutMs: number, maxResponseBytes: number): void {
   if (!Number.isInteger(destinationPort) || destinationPort < 1 || destinationPort > 65535) {
     throw new SshHttpError('SSH_FORWARD_FAILED', 'SSH forward destination port is invalid.');
@@ -134,16 +144,16 @@ async function httpRequestViaPinnedSsh(
   return new Promise<SshHttpResponse>((resolve, reject) => {
     const client = new Client();
     let channel: ClientChannel | null = null;
+    let activeRequest: http.ClientRequest | null = null;
     let settled = false;
     let hostKeyObserved = false;
     let hostKeyMismatch = false;
-    const received: Buffer[] = [];
-    let receivedBytes = 0;
 
     const finish = (error?: Error, response?: SshHttpResponse) => {
       if (settled) return;
       settled = true;
       clearTimeout(timer);
+      try { activeRequest?.destroy(); } catch { /* best effort */ }
       try { channel?.destroy(); } catch { /* best effort */ }
       try { client.end(); } catch { /* best effort */ }
       if (error) reject(error);
@@ -159,42 +169,59 @@ async function httpRequestViaPinnedSsh(
           return;
         }
         channel = stream;
-        stream.on('data', (chunk: Buffer) => {
-          if (settled) return;
-          receivedBytes += chunk.length;
-          if (receivedBytes > maxResponseBytes + 16 * 1024) {
-            finish(new SshHttpError('HTTP_RESPONSE_TOO_LARGE', 'HTTP response exceeded the configured size limit.'));
-            return;
-          }
-          received.push(Buffer.from(chunk));
-        });
         stream.once('error', () => finish(new SshHttpError('SSH_FORWARD_FAILED', 'SSH forwarded TCP stream failed.')));
-        stream.once('close', () => {
-          if (settled) return;
-          try {
-            finish(undefined, parseHttpResponse(Buffer.concat(received, receivedBytes), maxResponseBytes));
-          } catch (parseError) {
-            finish(parseError instanceof Error ? parseError : new SshHttpError('HTTP_RESPONSE_INVALID', 'HTTP response parsing failed.'));
-          }
-        });
+
         const hostHeader = destinationHost.includes(':') ? `[${destinationHost}]:${destinationPort}` : `${destinationHost}:${destinationPort}`;
-        const headers = [
-          `${request.method} ${request.path} HTTP/1.1`,
-          `Host: ${hostHeader}`,
-          'Accept: application/json',
-        ];
+        const headers: http.OutgoingHttpHeaders = {
+          Host: hostHeader,
+          Accept: 'application/json',
+          Connection: 'close',
+          'User-Agent': 'ollama-remote-control',
+        };
         if (request.body) {
-          headers.push(`Content-Type: ${request.contentType ?? 'application/json'}`);
-          headers.push(`Content-Length: ${request.body.length}`);
+          headers['Content-Type'] = request.contentType ?? 'application/json';
+          headers['Content-Length'] = request.body.length;
         }
-        headers.push('Connection: close', '', '');
-        const head = Buffer.from(headers.join('\r\n'), 'utf8');
-        const payload = request.body ? Buffer.concat([head, request.body]) : head;
-        // Do not half-close the SSH direct-tcpip channel after sending the request.
-        // Some Ollama/Go HTTP paths treat the early client FIN as a cancelled request
-        // while preparing larger responses such as /api/tags. Connection: close asks
-        // the server to close the channel after the complete response instead.
-        stream.write(payload);
+
+        const nodeRequest = http.request({
+          method: request.method,
+          path: request.path,
+          hostname: destinationHost,
+          port: destinationPort,
+          headers,
+          agent: false,
+          createConnection: () => stream,
+        }, (response) => {
+          const chunks: Buffer[] = [];
+          let total = 0;
+          response.on('data', (chunk: Buffer) => {
+            if (settled) return;
+            total += chunk.length;
+            if (total > maxResponseBytes) {
+              finish(new SshHttpError('HTTP_RESPONSE_TOO_LARGE', 'HTTP response exceeded the configured size limit.'));
+              return;
+            }
+            chunks.push(Buffer.from(chunk));
+          });
+          response.once('aborted', () => finish(new SshHttpError('HTTP_RESPONSE_INVALID', 'HTTP response was aborted.')));
+          response.once('error', () => finish(new SshHttpError('HTTP_RESPONSE_INVALID', 'HTTP response stream failed.')));
+          response.once('end', () => {
+            if (settled) return;
+            const statusCode = response.statusCode;
+            if (!statusCode || statusCode < 100 || statusCode > 999) {
+              finish(new SshHttpError('HTTP_RESPONSE_INVALID', 'HTTP response status is invalid.'));
+              return;
+            }
+            finish(undefined, {
+              statusCode,
+              headers: normalizeResponseHeaders(response.headers),
+              body: Buffer.concat(chunks, total),
+            });
+          });
+        });
+        activeRequest = nodeRequest;
+        nodeRequest.once('error', () => finish(new SshHttpError('SSH_FORWARD_FAILED', 'SSH-tunneled HTTP request failed.')));
+        nodeRequest.end(request.body);
       });
     });
     client.once('error', () => {
