@@ -28,6 +28,7 @@ const MIME_TYPES: Readonly<Record<string, string>> = {
   '.png': 'image/png',
   '.svg': 'image/svg+xml',
   '.wasm': 'application/wasm',
+  '.webmanifest': 'application/manifest+json; charset=utf-8',
   '.webp': 'image/webp',
   '.woff': 'font/woff',
   '.woff2': 'font/woff2',
@@ -98,14 +99,22 @@ export function registerWebAssets(app: FastifyInstance, webDistPath: string | nu
   if (!configured) return;
   const root = resolve(configured);
   const assetsRoot = join(root, 'assets');
+  const brandRoot = join(root, 'brand');
 
   const indexHandler = async (_request: unknown, reply: FastifyReply) => sendFile(reply, root, join(root, 'index.html'), false, true);
   app.get('/', indexHandler);
   app.get('/index.html', indexHandler);
+  app.get('/manifest.webmanifest', async (_request, reply) => sendFile(reply, root, join(root, 'manifest.webmanifest'), false));
   app.get<{ Params: { '*': string } }>('/assets/*', async (request, reply) => {
     const relativeAsset = safeAssetRelativePath(request.params['*']);
     if (!relativeAsset) return reply.code(404).send({ error: { code: 'WEB_ASSET_NOT_FOUND', message: 'Web asset was not found.' } });
     const candidate = join(assetsRoot, relativeAsset);
     return sendFile(reply, assetsRoot, candidate, isFingerprintedAsset(candidate));
+  });
+  app.get<{ Params: { '*': string } }>('/brand/*', async (request, reply) => {
+    const relativeAsset = safeAssetRelativePath(request.params['*']);
+    if (!relativeAsset) return reply.code(404).send({ error: { code: 'WEB_ASSET_NOT_FOUND', message: 'Web asset was not found.' } });
+    const candidate = join(brandRoot, relativeAsset);
+    return sendFile(reply, brandRoot, candidate, false);
   });
 }
