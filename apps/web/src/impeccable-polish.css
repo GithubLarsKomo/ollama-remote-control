@@ -1,0 +1,246 @@
+/* Impeccable-inspired second-pass polish. Loaded last so legacy surface CSS
+ * inherits the current design tokens without changing component behavior. */
+
+.brand-mark {
+  background: #0b0f0d url('/brand/ollama-remote-mark.svg') center / cover no-repeat;
+  border-color: #29443a;
+  color: transparent;
+  font-size: 0;
+  overflow: hidden;
+}
+
+.topbar > div:first-child {
+  position: relative;
+  min-height: 2.5rem;
+  display: grid;
+  align-content: center;
+  padding-left: 3.1rem;
+}
+
+.topbar > div:first-child::before {
+  position: absolute;
+  left: 0;
+  top: 50%;
+  width: 2.35rem;
+  height: 2.35rem;
+  border-radius: 0.62rem;
+  background: url('/brand/ollama-remote-mark.svg') center / cover no-repeat;
+  content: '';
+  transform: translateY(-50%);
+}
+
+.topbar strong {
+  letter-spacing: -0.01em;
+}
+
+/* Prefer clear work surfaces over nested generic cards. */
+.models-panel,
+.logs-panel,
+.lifecycle-panel,
+.update-panel,
+.local-modelfiles,
+.modelfiles-surface,
+.model-detail-panel {
+  border-color: var(--border) !important;
+  background: var(--surface) !important;
+  box-shadow: none !important;
+}
+
+.models-panel,
+.logs-panel,
+.lifecycle-panel,
+.update-panel,
+.local-modelfiles,
+.modelfiles-surface {
+  margin-top: 1.15rem;
+  border-radius: 0.9rem !important;
+}
+
+.models-heading,
+.logs-heading,
+.lifecycle-heading,
+.update-heading {
+  border-color: var(--border-subtle) !important;
+}
+
+.models-heading .muted,
+.logs-heading .muted,
+.lifecycle-heading .muted,
+.update-heading .muted {
+  max-width: 66rem;
+  line-height: 1.55;
+}
+
+.models-summary {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0;
+  overflow: hidden;
+  border: 1px solid var(--border-subtle);
+  border-radius: 0.72rem;
+  background: var(--surface-soft);
+}
+
+.models-summary > div {
+  border: 0 !important;
+  border-right: 1px solid var(--border-subtle) !important;
+  border-radius: 0 !important;
+  background: transparent !important;
+}
+
+.models-summary > div:last-child {
+  border-right: 0 !important;
+}
+
+.model-table-wrap {
+  border-color: var(--border-subtle) !important;
+  border-radius: 0.7rem !important;
+}
+
+.model-table {
+  background: #09120f !important;
+}
+
+.model-table th,
+.model-table td {
+  border-color: var(--border-subtle) !important;
+}
+
+.model-table tbody tr:hover {
+  background: rgba(125, 223, 181, 0.035);
+}
+
+.model-detail-panel {
+  border-radius: 0.72rem !important;
+}
+
+.model-detail-tabs {
+  gap: 0;
+  border-bottom: 1px solid var(--border-subtle);
+  padding: 0 1rem;
+}
+
+.model-detail-tab {
+  border: 0 !important;
+  border-bottom: 2px solid transparent !important;
+  border-radius: 0 !important;
+  background: transparent !important;
+  padding: 0.7rem 0.8rem !important;
+  color: var(--muted) !important;
+}
+
+.model-detail-tab.active {
+  border-bottom-color: var(--accent-strong) !important;
+  color: var(--text) !important;
+}
+
+.running-model-card,
+.device-card {
+  border-color: var(--border-subtle) !important;
+  background: var(--surface-soft) !important;
+  box-shadow: none !important;
+}
+
+.running-model-card {
+  border-left: 3px solid #477963 !important;
+}
+
+.model-loaded-badge,
+.lifecycle-state,
+.logs-state {
+  border-radius: 999px;
+  font-weight: 800;
+  letter-spacing: 0.02em;
+}
+
+.logs-controls,
+.lifecycle-actions {
+  border-color: var(--border-subtle) !important;
+  background: var(--surface-soft) !important;
+}
+
+.logs-output {
+  border-color: var(--border-subtle) !important;
+  background: #060b09 !important;
+  box-shadow: inset 0 1px 0 rgba(255,255,255,0.015);
+}
+
+.logs-entry {
+  border-color: #17251f !important;
+}
+
+.lifecycle-confirm {
+  border-color: #6a5431 !important;
+  background: #241d10 !important;
+  box-shadow: none !important;
+}
+
+.lifecycle-result,
+.lifecycle-progress {
+  border-color: var(--border-subtle) !important;
+  background: var(--surface-soft) !important;
+  box-shadow: none !important;
+}
+
+/* Audit should read as a searchable record, not a second dashboard. */
+#audit-title + .muted {
+  max-width: 60rem;
+}
+
+.panel .device-list > .device-card {
+  padding: 0.95rem 1rem;
+  border-radius: 0.7rem;
+}
+
+.panel .device-list > .device-card .panel-heading {
+  margin-bottom: 0.8rem;
+}
+
+.panel .device-list > .device-card h3 {
+  margin-bottom: 0;
+  font-size: 0.92rem;
+}
+
+.panel details {
+  color: var(--muted);
+}
+
+.panel summary {
+  width: fit-content;
+  cursor: pointer;
+  font-weight: 700;
+}
+
+.panel details pre {
+  border: 1px solid var(--border-subtle);
+  border-radius: 0.55rem;
+  background: #07100d;
+  padding: 0.8rem;
+  color: #cbd8d3;
+}
+
+@media (max-width: 720px) {
+  .models-summary {
+    grid-template-columns: 1fr;
+  }
+
+  .models-summary > div {
+    border-right: 0 !important;
+    border-bottom: 1px solid var(--border-subtle) !important;
+  }
+
+  .models-summary > div:last-child {
+    border-bottom: 0 !important;
+  }
+}
+
+@media (max-width: 560px) {
+  .topbar > div:first-child {
+    min-height: 2.15rem;
+    padding-left: 2.75rem;
+  }
+
+  .topbar > div:first-child::before {
+    width: 2rem;
+    height: 2rem;
+  }
+}
