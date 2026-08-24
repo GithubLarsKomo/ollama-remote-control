@@ -1,0 +1,361 @@
+.help-launcher {
+  position: fixed;
+  right: clamp(1rem, 2.5vw, 2rem);
+  bottom: clamp(1rem, 2.5vw, 2rem);
+  z-index: 24;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.55rem;
+  min-height: 2.8rem;
+  border: 1px solid #426356;
+  border-radius: 999px;
+  background: rgba(17, 29, 25, 0.96);
+  color: var(--text);
+  box-shadow: 0 16px 42px rgba(0, 0, 0, 0.34);
+  padding: 0.6rem 0.9rem 0.6rem 0.65rem;
+  font-weight: 780;
+  backdrop-filter: blur(14px);
+}
+
+.help-launcher:hover {
+  border-color: var(--accent);
+  background: #172720;
+}
+
+.help-launcher > span:first-child {
+  width: 1.6rem;
+  height: 1.6rem;
+  display: grid;
+  place-items: center;
+  border-radius: 999px;
+  background: var(--accent-strong);
+  color: #05120d;
+  font-weight: 900;
+}
+
+.help-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 30;
+  display: grid;
+  place-items: center;
+  background: rgba(2, 7, 5, 0.78);
+  padding: clamp(0.5rem, 2vw, 1.5rem);
+  backdrop-filter: blur(10px);
+}
+
+.help-center {
+  width: min(100%, 82rem);
+  max-height: min(92vh, 60rem);
+  overflow: auto;
+  border: 1px solid #355047;
+  border-radius: 1rem;
+  background: #0b1512;
+  box-shadow: 0 30px 100px rgba(0, 0, 0, 0.5);
+}
+
+.help-header {
+  position: sticky;
+  top: 0;
+  z-index: 3;
+  display: flex;
+  justify-content: space-between;
+  gap: 1.5rem;
+  align-items: flex-start;
+  border-bottom: 1px solid var(--border);
+  background: rgba(11, 21, 18, 0.96);
+  padding: 1.25rem clamp(1rem, 3vw, 1.75rem);
+  backdrop-filter: blur(14px);
+}
+
+.help-header h2,
+.help-detail-heading h2 {
+  margin-bottom: 0.45rem;
+  font-size: clamp(1.35rem, 2.4vw, 1.8rem);
+}
+
+.help-header .muted {
+  margin-bottom: 0;
+}
+
+.help-close {
+  flex: none;
+  width: 2.4rem;
+  height: 2.4rem;
+  border: 1px solid var(--border);
+  border-radius: 0.65rem;
+  background: var(--surface-soft);
+  color: var(--text);
+  font-size: 1.45rem;
+  line-height: 1;
+}
+
+.help-close:hover {
+  border-color: #4a6d60;
+  background: var(--surface-raised);
+}
+
+.help-workflows {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 0.7rem;
+  border-bottom: 1px solid var(--border-subtle);
+  padding: 1rem clamp(1rem, 3vw, 1.75rem);
+}
+
+.help-workflow-card {
+  min-width: 0;
+  border: 1px solid var(--border-subtle);
+  border-radius: 0.75rem;
+  background: var(--surface-soft);
+  padding: 0.9rem;
+}
+
+.help-workflow-card > strong {
+  display: block;
+  margin-bottom: 0.35rem;
+  font-size: 0.9rem;
+}
+
+.help-workflow-card > p {
+  min-height: 3.9rem;
+  margin-bottom: 0.65rem;
+  color: var(--muted);
+  font-size: 0.78rem;
+  line-height: 1.5;
+}
+
+.help-workflow-modules {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.3rem;
+}
+
+.help-workflow-modules > span {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  color: #779088;
+}
+
+.help-workflow-modules button {
+  border: 0;
+  background: transparent;
+  color: var(--accent);
+  padding: 0;
+  font-size: 0.74rem;
+  font-weight: 750;
+  text-align: left;
+}
+
+.help-workflow-modules button:hover {
+  color: #baf0d7;
+  text-decoration: underline;
+}
+
+.help-layout {
+  display: grid;
+  grid-template-columns: minmax(14rem, 18rem) minmax(0, 1fr);
+  min-height: 33rem;
+}
+
+.help-module-list {
+  border-right: 1px solid var(--border-subtle);
+  background: #0d1815;
+  padding: 1rem;
+}
+
+.help-module-list > label {
+  margin-bottom: 0.85rem;
+}
+
+.help-module-list nav {
+  display: grid;
+  gap: 0.35rem;
+}
+
+.help-topic {
+  display: grid;
+  gap: 0.2rem;
+  width: 100%;
+  border: 1px solid transparent;
+  border-radius: 0.65rem;
+  background: transparent;
+  color: var(--text);
+  padding: 0.7rem 0.75rem;
+  text-align: left;
+}
+
+.help-topic:hover {
+  border-color: var(--border);
+  background: var(--surface-soft);
+}
+
+.help-topic.active {
+  border-color: #355c4d;
+  background: var(--accent-soft);
+}
+
+.help-topic span {
+  font-size: 0.86rem;
+  font-weight: 760;
+}
+
+.help-topic small {
+  color: var(--muted);
+  font-size: 0.68rem;
+}
+
+.help-no-results {
+  margin: 0.8rem 0 0;
+  color: var(--muted);
+  font-size: 0.8rem;
+  line-height: 1.5;
+}
+
+.help-detail {
+  min-width: 0;
+  padding: clamp(1rem, 3vw, 1.75rem);
+}
+
+.help-detail-heading {
+  max-width: 48rem;
+  margin-bottom: 1.2rem;
+}
+
+.help-detail-heading > p:last-child {
+  margin-bottom: 0;
+  color: #c6d3ce;
+  line-height: 1.6;
+}
+
+.help-detail-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.75rem;
+}
+
+.help-detail-section {
+  border: 1px solid var(--border-subtle);
+  border-radius: 0.75rem;
+  background: var(--surface);
+  padding: 1rem;
+}
+
+.help-detail-section h3,
+.help-next h3 {
+  margin-bottom: 0.65rem;
+  font-size: 0.86rem;
+}
+
+.help-detail-section ul {
+  display: grid;
+  gap: 0.5rem;
+  margin: 0;
+  padding-left: 1.15rem;
+  color: #b9c8c3;
+  font-size: 0.8rem;
+  line-height: 1.5;
+}
+
+.help-detail-section li::marker {
+  color: var(--accent);
+}
+
+.help-next {
+  margin-top: 1rem;
+  border-top: 1px solid var(--border-subtle);
+  padding-top: 1rem;
+}
+
+.help-next > div {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.55rem;
+}
+
+.help-next .secondary-button {
+  min-height: 2.2rem;
+  padding: 0.45rem 0.7rem;
+  font-size: 0.76rem;
+}
+
+@media (max-width: 1080px) {
+  .help-workflows {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .help-workflow-card > p {
+    min-height: 0;
+  }
+}
+
+@media (max-width: 760px) {
+  .help-center {
+    max-height: calc(100vh - 1rem);
+  }
+
+  .help-workflows,
+  .help-layout,
+  .help-detail-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .help-module-list {
+    border-right: 0;
+    border-bottom: 1px solid var(--border-subtle);
+  }
+
+  .help-module-list nav {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 520px) {
+  .help-launcher {
+    right: 0.75rem;
+    bottom: 0.75rem;
+  }
+
+  .help-launcher > span:last-child {
+    display: none;
+  }
+
+  .help-launcher {
+    width: 2.9rem;
+    padding: 0.6rem;
+  }
+
+  .help-launcher > span:first-child {
+    width: 100%;
+  }
+
+  .help-backdrop {
+    padding: 0;
+  }
+
+  .help-center {
+    min-height: 100vh;
+    max-height: 100vh;
+    border: 0;
+    border-radius: 0;
+  }
+
+  .help-header {
+    padding: 1rem;
+  }
+
+  .help-workflows {
+    grid-template-columns: 1fr;
+    padding: 0.85rem 1rem;
+  }
+
+  .help-module-list nav {
+    grid-template-columns: 1fr;
+  }
+
+  .help-detail {
+    padding: 1rem;
+  }
+}
