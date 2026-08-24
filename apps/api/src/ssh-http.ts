@@ -130,116 +130,35 @@ function validateDestination(destinationHost: string, destinationPort: number, t
   }
 }
 
-async function httpRequestViaPinnedSsh(
-  connection: SshPrivateKeyConnection,
-  destinationHost: string,
-  destinationPort: number,
-  request: FixedHttpRequest,
-  options: SshHttpOptions,
-): Promise<SshHttpResponse> {
-  const timeoutMs = options.timeoutMs ?? 5_000;
-  const maxResponseBytes = options.maxResponseBytes ?? 64 * 1024;
-  validateDestination(destinationHost, destinationPort, timeoutMs, maxResponseBytes);
-
-  return new Promise<SshHttpResponse>((resolve, reject) => {
+function connectPinnedSsh(connection: SshPrivateKeyConnection, timeoutMs: number): Promise<Client> {
+  return new Promise<Client>((resolve, reject) => {
     const client = new Client();
-    let channel: ClientChannel | null = null;
-    let activeRequest: http.ClientRequest | null = null;
     let settled = false;
-    let responseStarted = false;
     let hostKeyObserved = false;
     let hostKeyMismatch = false;
+    const timer = setTimeout(() => {
+      if (settled) return;
+      settled = true;
+      try { client.end(); } catch { /* best effort */ }
+      reject(new SshHttpError('HTTP_TIMEOUT', 'SSH connection timed out.'));
+    }, timeoutMs);
 
-    const finish = (error?: Error, response?: SshHttpResponse) => {
+    client.once('ready', () => {
       if (settled) return;
       settled = true;
       clearTimeout(timer);
-      try { activeRequest?.destroy(); } catch { /* best effort */ }
-      try { channel?.destroy(); } catch { /* best effort */ }
-      try { client.end(); } catch { /* best effort */ }
-      if (error) reject(error);
-      else resolve(response!);
-    };
-
-    const timer = setTimeout(() => finish(new SshHttpError('HTTP_TIMEOUT', 'SSH-tunneled HTTP request timed out.')), timeoutMs);
-
-    client.on('ready', () => {
-      client.forwardOut('127.0.0.1', 0, destinationHost, destinationPort, (error, stream) => {
-        if (error) {
-          finish(new SshHttpError('SSH_FORWARD_FAILED', 'SSH TCP forwarding failed.'));
-          return;
-        }
-        channel = stream;
-        stream.once('error', () => {
-          if (!responseStarted) finish(new SshHttpError('SSH_FORWARD_FAILED', 'SSH forwarded TCP stream failed.'));
-        });
-
-        const hostHeader = destinationHost.includes(':') ? `[${destinationHost}]:${destinationPort}` : `${destinationHost}:${destinationPort}`;
-        const headers: http.OutgoingHttpHeaders = {
-          Host: hostHeader,
-          Accept: 'application/json',
-          Connection: 'close',
-          'User-Agent': 'ollama-remote-control',
-        };
-        if (request.body) {
-          headers['Content-Type'] = request.contentType ?? 'application/json';
-          headers['Content-Length'] = request.body.length;
-        }
-
-        const nodeRequest = http.request({
-          method: request.method,
-          path: request.path,
-          hostname: destinationHost,
-          port: destinationPort,
-          headers,
-          agent: false,
-          createConnection: () => stream,
-        }, (response) => {
-          responseStarted = true;
-          const chunks: Buffer[] = [];
-          let total = 0;
-          response.on('data', (chunk: Buffer) => {
-            if (settled) return;
-            total += chunk.length;
-            if (total > maxResponseBytes) {
-              finish(new SshHttpError('HTTP_RESPONSE_TOO_LARGE', 'HTTP response exceeded the configured size limit.'));
-              return;
-            }
-            chunks.push(Buffer.from(chunk));
-          });
-          response.once('aborted', () => finish(new SshHttpError('HTTP_RESPONSE_INVALID', 'HTTP response was aborted.')));
-          response.once('error', () => finish(new SshHttpError('HTTP_RESPONSE_INVALID', 'HTTP response stream failed.')));
-          response.once('end', () => {
-            if (settled) return;
-            const statusCode = response.statusCode;
-            if (!statusCode || statusCode < 100 || statusCode > 999) {
-              finish(new SshHttpError('HTTP_RESPONSE_INVALID', 'HTTP response status is invalid.'));
-              return;
-            }
-            finish(undefined, {
-              statusCode,
-              headers: normalizeResponseHeaders(response.headers),
-              body: Buffer.concat(chunks, total),
-            });
-          });
-        });
-        activeRequest = nodeRequest;
-        nodeRequest.once('error', () => {
-          if (!responseStarted) finish(new SshHttpError('SSH_FORWARD_FAILED', 'SSH-tunneled HTTP request failed.'));
-        });
-        nodeRequest.end(request.body);
-      });
+      client.on('error', () => { /* channel/request timeouts handle post-ready failures */ });
+      resolve(client);
     });
     client.once('error', () => {
-      if (responseStarted) return;
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
       if (hostKeyObserved && hostKeyMismatch) {
-        finish(new SshHttpError('SSH_HOST_KEY_MISMATCH', 'SSH host-key verification failed.'));
+        reject(new SshHttpError('SSH_HOST_KEY_MISMATCH', 'SSH host-key verification failed.'));
         return;
       }
-      finish(new SshHttpError('SSH_CONNECT_FAILED', 'SSH connection failed.'));
-    });
-    client.once('end', () => {
-      if (!settled && !channel) finish(new SshHttpError('SSH_CONNECT_FAILED', 'SSH connection ended before TCP forwarding started.'));
+      reject(new SshHttpError('SSH_CONNECT_FAILED', 'SSH connection failed.'));
     });
     client.connect({
       host: connection.hostname,
@@ -256,6 +175,150 @@ async function httpRequestViaPinnedSsh(
   });
 }
 
+function httpRequestViaConnectedSsh(
+  client: Client,
+  destinationHost: string,
+  destinationPort: number,
+  request: FixedHttpRequest,
+  timeoutMs: number,
+  maxResponseBytes: number,
+): Promise<SshHttpResponse> {
+  return new Promise<SshHttpResponse>((resolve, reject) => {
+    let channel: ClientChannel | null = null;
+    let activeRequest: http.ClientRequest | null = null;
+    let settled = false;
+    let responseStarted = false;
+
+    const finish = (error?: Error, response?: SshHttpResponse) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      try { activeRequest?.destroy(); } catch { /* best effort */ }
+      try { channel?.destroy(); } catch { /* best effort */ }
+      if (error) reject(error);
+      else resolve(response!);
+    };
+
+    const timer = setTimeout(() => finish(new SshHttpError('HTTP_TIMEOUT', 'SSH-tunneled HTTP request timed out.')), timeoutMs);
+
+    client.forwardOut('127.0.0.1', 0, destinationHost, destinationPort, (error, stream) => {
+      if (error) {
+        finish(new SshHttpError('SSH_FORWARD_FAILED', 'SSH TCP forwarding failed.'));
+        return;
+      }
+      channel = stream;
+      stream.once('error', () => {
+        if (!responseStarted) finish(new SshHttpError('SSH_FORWARD_FAILED', 'SSH forwarded TCP stream failed.'));
+      });
+
+      const hostHeader = destinationHost.includes(':') ? `[${destinationHost}]:${destinationPort}` : `${destinationHost}:${destinationPort}`;
+      const headers: http.OutgoingHttpHeaders = {
+        Host: hostHeader,
+        Accept: 'application/json',
+        Connection: 'close',
+        'User-Agent': 'ollama-remote-control',
+      };
+      if (request.body) {
+        headers['Content-Type'] = request.contentType ?? 'application/json';
+        headers['Content-Length'] = request.body.length;
+      }
+
+      const nodeRequest = http.request({
+        method: request.method,
+        path: request.path,
+        hostname: destinationHost,
+        port: destinationPort,
+        headers,
+        agent: false,
+        createConnection: () => stream,
+      }, (response) => {
+        responseStarted = true;
+        const chunks: Buffer[] = [];
+        let total = 0;
+        response.on('data', (chunk: Buffer) => {
+          if (settled) return;
+          total += chunk.length;
+          if (total > maxResponseBytes) {
+            finish(new SshHttpError('HTTP_RESPONSE_TOO_LARGE', 'HTTP response exceeded the configured size limit.'));
+            return;
+          }
+          chunks.push(Buffer.from(chunk));
+        });
+        response.once('aborted', () => finish(new SshHttpError('HTTP_RESPONSE_INVALID', 'HTTP response was aborted.')));
+        response.once('error', () => finish(new SshHttpError('HTTP_RESPONSE_INVALID', 'HTTP response stream failed.')));
+        response.once('end', () => {
+          if (settled) return;
+          const statusCode = response.statusCode;
+          if (!statusCode || statusCode < 100 || statusCode > 999) {
+            finish(new SshHttpError('HTTP_RESPONSE_INVALID', 'HTTP response status is invalid.'));
+            return;
+          }
+          finish(undefined, {
+            statusCode,
+            headers: normalizeResponseHeaders(response.headers),
+            body: Buffer.concat(chunks, total),
+          });
+        });
+      });
+      activeRequest = nodeRequest;
+      nodeRequest.once('error', () => {
+        if (!responseStarted) finish(new SshHttpError('SSH_FORWARD_FAILED', 'SSH-tunneled HTTP request failed.'));
+      });
+      nodeRequest.end(request.body);
+    });
+  });
+}
+
+async function httpRequestViaPinnedSsh(
+  connection: SshPrivateKeyConnection,
+  destinationHost: string,
+  destinationPort: number,
+  request: FixedHttpRequest,
+  options: SshHttpOptions,
+): Promise<SshHttpResponse> {
+  const timeoutMs = options.timeoutMs ?? 5_000;
+  const maxResponseBytes = options.maxResponseBytes ?? 64 * 1024;
+  validateDestination(destinationHost, destinationPort, timeoutMs, maxResponseBytes);
+  const client = await connectPinnedSsh(connection, timeoutMs);
+  try {
+    return await httpRequestViaConnectedSsh(client, destinationHost, destinationPort, request, timeoutMs, maxResponseBytes);
+  } finally {
+    try { client.end(); } catch { /* best effort */ }
+  }
+}
+
+export async function httpGetManyViaPinnedSsh(
+  connection: SshPrivateKeyConnection,
+  destinationHost: string,
+  destinationPort: number,
+  requestPaths: readonly OllamaReadPath[],
+  options: SshHttpOptions = {},
+): Promise<readonly SshHttpResponse[]> {
+  if (requestPaths.length === 0 || requestPaths.some((requestPath) => !OLLAMA_READ_PATHS.has(requestPath))) {
+    throw new SshHttpError('HTTP_REQUEST_INVALID', 'Ollama HTTP request path is not allowed.');
+  }
+  const timeoutMs = options.timeoutMs ?? 5_000;
+  const maxResponseBytes = options.maxResponseBytes ?? 64 * 1024;
+  validateDestination(destinationHost, destinationPort, timeoutMs, maxResponseBytes);
+  const client = await connectPinnedSsh(connection, timeoutMs);
+  try {
+    const responses: SshHttpResponse[] = [];
+    for (const requestPath of requestPaths) {
+      responses.push(await httpRequestViaConnectedSsh(
+        client,
+        destinationHost,
+        destinationPort,
+        { method: 'GET', path: requestPath },
+        timeoutMs,
+        maxResponseBytes,
+      ));
+    }
+    return responses;
+  } finally {
+    try { client.end(); } catch { /* best effort */ }
+  }
+}
+
 export async function httpGetViaPinnedSsh(
   connection: SshPrivateKeyConnection,
   destinationHost: string,
@@ -263,16 +326,14 @@ export async function httpGetViaPinnedSsh(
   requestPath: OllamaReadPath,
   options: SshHttpOptions = {},
 ): Promise<SshHttpResponse> {
-  if (!OLLAMA_READ_PATHS.has(requestPath)) {
-    throw new SshHttpError('HTTP_REQUEST_INVALID', 'Ollama HTTP request path is not allowed.');
-  }
-  return httpRequestViaPinnedSsh(
+  const [response] = await httpGetManyViaPinnedSsh(
     connection,
     destinationHost,
     destinationPort,
-    { method: 'GET', path: requestPath },
+    [requestPath],
     options,
   );
+  return response;
 }
 
 export async function httpPostOllamaShowViaPinnedSsh(
