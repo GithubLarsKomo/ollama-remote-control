@@ -51,15 +51,21 @@
   padding: 1rem;
 }
 
+.update-action-row > div:first-child {
+  min-width: 0;
+  flex: 1 1 auto;
+}
+
 .update-action-row-end {
   justify-content: flex-end;
   background: transparent;
   padding: 0;
 }
 
-.update-primary {
+.update-action-row > .update-primary {
   width: auto;
-  flex: none;
+  flex: 0 0 auto;
+  white-space: nowrap;
 }
 
 .danger-button {
@@ -331,7 +337,7 @@
   }
 
   .update-action-row-end button,
-  .update-primary,
+  .update-action-row > .update-primary,
   .danger-button {
     width: 100%;
   }
