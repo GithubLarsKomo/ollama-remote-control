@@ -24,6 +24,7 @@ test('production server serves the SPA and versioned API from the same Fastify i
   const app = buildProductionServer({
     ORC_DATABASE_PATH: databasePath,
     ORC_WEB_DIST_PATH: webDist,
+    ORC_RELEASE_VERSION: '0.1.0-beta.1',
   });
   try {
     await app.ready();
@@ -41,6 +42,7 @@ test('production server serves the SPA and versioned API from the same Fastify i
     assert.equal(response.statusCode, 200);
     assert.equal(response.json().status, 'ok');
     assert.equal(response.json().service, 'ollama-remote-control-api');
+    assert.equal(response.json().version, '0.1.0-beta.1');
 
     response = await app.inject({ method: 'GET', url: '/api/v1/not-a-real-route' });
     assert.equal(response.statusCode, 404);
@@ -59,6 +61,7 @@ test('production server remains API-only when ORC_WEB_DIST_PATH is not configure
     assert.equal(root.statusCode, 404);
     const health = await app.inject({ method: 'GET', url: '/api/v1/health' });
     assert.equal(health.statusCode, 200);
+    assert.equal(health.json().version, '0.0.0-dev');
   } finally {
     await app.close();
   }
