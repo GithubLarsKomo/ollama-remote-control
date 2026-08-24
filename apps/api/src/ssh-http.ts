@@ -188,27 +188,50 @@ function httpRequestViaConnectedSsh(
     let activeRequest: http.ClientRequest | null = null;
     let settled = false;
     let responseStarted = false;
+    let completedResponse: SshHttpResponse | null = null;
 
-    const finish = (error?: Error, response?: SshHttpResponse) => {
+    const fail = (error: Error) => {
       if (settled) return;
       settled = true;
       clearTimeout(timer);
       try { activeRequest?.destroy(); } catch { /* best effort */ }
       try { channel?.destroy(); } catch { /* best effort */ }
-      if (error) reject(error);
-      else resolve(response!);
+      reject(error);
     };
 
-    const timer = setTimeout(() => finish(new SshHttpError('HTTP_TIMEOUT', 'SSH-tunneled HTTP request timed out.')), timeoutMs);
+    const completeAfterChannelClose = (response: SshHttpResponse) => {
+      if (settled) return;
+      completedResponse = response;
+      activeRequest = null;
+      const activeChannel = channel;
+      if (!activeChannel || activeChannel.destroyed) {
+        settled = true;
+        clearTimeout(timer);
+        resolve(response);
+        return;
+      }
+      activeChannel.once('close', () => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timer);
+        resolve(completedResponse ?? response);
+      });
+      // The HTTP response is complete. Gracefully close the direct-tcpip channel
+      // and wait for ssh2's close acknowledgement before opening another one.
+      // Using destroy() here races the next forwardOut() on real OpenSSH hosts.
+      try { activeChannel.end(); } catch { fail(new SshHttpError('SSH_FORWARD_FAILED', 'SSH forwarded TCP stream could not close cleanly.')); }
+    };
+
+    const timer = setTimeout(() => fail(new SshHttpError('HTTP_TIMEOUT', 'SSH-tunneled HTTP request timed out.')), timeoutMs);
 
     client.forwardOut('127.0.0.1', 0, destinationHost, destinationPort, (error, stream) => {
       if (error) {
-        finish(new SshHttpError('SSH_FORWARD_FAILED', 'SSH TCP forwarding failed.'));
+        fail(new SshHttpError('SSH_FORWARD_FAILED', 'SSH TCP forwarding failed.'));
         return;
       }
       channel = stream;
       stream.once('error', () => {
-        if (!responseStarted) finish(new SshHttpError('SSH_FORWARD_FAILED', 'SSH forwarded TCP stream failed.'));
+        if (!responseStarted) fail(new SshHttpError('SSH_FORWARD_FAILED', 'SSH forwarded TCP stream failed.'));
       });
 
       const hostHeader = destinationHost.includes(':') ? `[${destinationHost}]:${destinationPort}` : `${destinationHost}:${destinationPort}`;
@@ -239,21 +262,21 @@ function httpRequestViaConnectedSsh(
           if (settled) return;
           total += chunk.length;
           if (total > maxResponseBytes) {
-            finish(new SshHttpError('HTTP_RESPONSE_TOO_LARGE', 'HTTP response exceeded the configured size limit.'));
+            fail(new SshHttpError('HTTP_RESPONSE_TOO_LARGE', 'HTTP response exceeded the configured size limit.'));
             return;
           }
           chunks.push(Buffer.from(chunk));
         });
-        response.once('aborted', () => finish(new SshHttpError('HTTP_RESPONSE_INVALID', 'HTTP response was aborted.')));
-        response.once('error', () => finish(new SshHttpError('HTTP_RESPONSE_INVALID', 'HTTP response stream failed.')));
+        response.once('aborted', () => fail(new SshHttpError('HTTP_RESPONSE_INVALID', 'HTTP response was aborted.')));
+        response.once('error', () => fail(new SshHttpError('HTTP_RESPONSE_INVALID', 'HTTP response stream failed.')));
         response.once('end', () => {
           if (settled) return;
           const statusCode = response.statusCode;
           if (!statusCode || statusCode < 100 || statusCode > 999) {
-            finish(new SshHttpError('HTTP_RESPONSE_INVALID', 'HTTP response status is invalid.'));
+            fail(new SshHttpError('HTTP_RESPONSE_INVALID', 'HTTP response status is invalid.'));
             return;
           }
-          finish(undefined, {
+          completeAfterChannelClose({
             statusCode,
             headers: normalizeResponseHeaders(response.headers),
             body: Buffer.concat(chunks, total),
@@ -262,7 +285,7 @@ function httpRequestViaConnectedSsh(
       });
       activeRequest = nodeRequest;
       nodeRequest.once('error', () => {
-        if (!responseStarted) finish(new SshHttpError('SSH_FORWARD_FAILED', 'SSH-tunneled HTTP request failed.'));
+        if (!responseStarted) fail(new SshHttpError('SSH_FORWARD_FAILED', 'SSH-tunneled HTTP request failed.'));
       });
       nodeRequest.end(request.body);
     });
