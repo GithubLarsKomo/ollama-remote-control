@@ -231,6 +231,7 @@ async function httpRequestViaPinnedSsh(
       });
     });
     client.once('error', () => {
+      if (responseStarted) return;
       if (hostKeyObserved && hostKeyMismatch) {
         finish(new SshHttpError('SSH_HOST_KEY_MISMATCH', 'SSH host-key verification failed.'));
         return;
