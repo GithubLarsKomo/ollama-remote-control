@@ -24,6 +24,9 @@ const MAX_DETAIL_STRING = 256;
 const MAX_FAMILIES = 32;
 const MAX_RESPONSE_BYTES = 1024 * 1024;
 
+type ApiRoute = { readonly host: string; readonly port: number };
+type InventoryPath = '/api/tags' | '/api/ps';
+
 export interface OllamaModelDetailsView {
   readonly format: string | null;
   readonly family: string | null;
@@ -201,6 +204,45 @@ function mapSshHttpError(error: SshHttpError): OllamaModelInventoryError {
   return new OllamaModelInventoryError('OLLAMA_API_UNAVAILABLE', 502, `Ollama API could not be reached through SSH (${error.code}).`, { cause: error });
 }
 
+function routeUrl(route: ApiRoute, path: InventoryPath): string {
+  const host = route.host.includes(':') ? `[${route.host}]` : route.host;
+  return `http://${host}:${route.port}${path}`;
+}
+
+async function getViaPinnedSshExec(
+  connection: SshPrivateKeyConnection,
+  route: ApiRoute,
+  path: InventoryPath,
+): Promise<Buffer> {
+  let result;
+  try {
+    result = await execPrivateKey(
+      connection,
+      [
+        'curl',
+        '--noproxy', '*',
+        '--fail',
+        '--silent',
+        '--show-error',
+        '--max-time', '7',
+        '--header', 'Accept: application/json',
+        routeUrl(route, path),
+      ],
+      { timeoutMs: 10_000, maxOutputBytes: MAX_RESPONSE_BYTES },
+    );
+  } catch (error) {
+    if (error instanceof SshTransportError) {
+      const status = error.code === 'SSH_HOST_KEY_MISMATCH' ? 409 : error.code === 'AUTH_FAILED' ? 422 : 502;
+      throw new OllamaModelInventoryError(error.code, status, `Ollama ${path} fallback request over SSH exec failed.`, { cause: error });
+    }
+    throw error;
+  }
+  if (result.exitCode !== 0) {
+    throw new OllamaModelInventoryError('OLLAMA_API_UNAVAILABLE', 502, `Ollama ${path} fallback request over SSH exec failed.`);
+  }
+  return Buffer.from(result.stdout, 'utf8');
+}
+
 export class OllamaModelInventoryService {
   constructor(
     private readonly hosts: HostOnboardingRepository,
@@ -267,10 +309,10 @@ export class OllamaModelInventoryService {
     const route = selectOllamaApiRoute(inspect);
     if (!route) throw new OllamaModelInventoryError('OLLAMA_API_UNAVAILABLE', 502, 'No safe Ollama API route could be derived from Docker state.');
 
-    let installedResponse;
-    let runningResponse;
+    let installedBody: Buffer;
+    let runningBody: Buffer;
     try {
-      [installedResponse, runningResponse] = await Promise.all([
+      const [installedResponse, runningResponse] = await Promise.all([
         httpGetViaPinnedSsh(
           target.connection,
           route.host,
@@ -286,23 +328,28 @@ export class OllamaModelInventoryService {
           { timeoutMs: 7_500, maxResponseBytes: MAX_RESPONSE_BYTES },
         ),
       ]);
+      if (installedResponse.statusCode < 200 || installedResponse.statusCode >= 300) {
+        throw new OllamaModelInventoryError('OLLAMA_API_ERROR', 502, `Ollama /api/tags returned HTTP ${installedResponse.statusCode}.`);
+      }
+      if (runningResponse.statusCode < 200 || runningResponse.statusCode >= 300) {
+        throw new OllamaModelInventoryError('OLLAMA_API_ERROR', 502, `Ollama /api/ps returned HTTP ${runningResponse.statusCode}.`);
+      }
+      installedBody = installedResponse.body;
+      runningBody = runningResponse.body;
     } catch (error) {
-      if (error instanceof SshHttpError) throw mapSshHttpError(error);
-      throw new OllamaModelInventoryError('OLLAMA_API_UNAVAILABLE', 502, 'Ollama model inventory request failed.');
-    }
-
-    if (installedResponse.statusCode < 200 || installedResponse.statusCode >= 300) {
-      throw new OllamaModelInventoryError('OLLAMA_API_ERROR', 502, `Ollama /api/tags returned HTTP ${installedResponse.statusCode}.`);
-    }
-    if (runningResponse.statusCode < 200 || runningResponse.statusCode >= 300) {
-      throw new OllamaModelInventoryError('OLLAMA_API_ERROR', 502, `Ollama /api/ps returned HTTP ${runningResponse.statusCode}.`);
+      if (!(error instanceof SshHttpError)) throw error;
+      if (error.code === 'SSH_HOST_KEY_MISMATCH') throw mapSshHttpError(error);
+      [installedBody, runningBody] = await Promise.all([
+        getViaPinnedSshExec(target.connection, route, '/api/tags'),
+        getViaPinnedSshExec(target.connection, route, '/api/ps'),
+      ]);
     }
 
     return {
       targetId: target.targetId,
       transport: { mode: route.mode },
-      installed: parseInstalledModels(installedResponse.body),
-      running: parseRunningModels(runningResponse.body),
+      installed: parseInstalledModels(installedBody),
+      running: parseRunningModels(runningBody),
     };
   }
 }
