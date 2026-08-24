@@ -17,6 +17,7 @@ services:
       ORC_DATABASE_PATH: /data/ollama-remote-control.sqlite
       ORC_WEB_DIST_PATH: /app/apps/web/dist
       ORC_MASTER_KEY_FILE: /run/secrets/orc_master_key
+      ORC_SECURE_COOKIES: ${ORC_SECURE_COOKIES:-true}
     volumes:
       - orc-data:/data
     tmpfs:

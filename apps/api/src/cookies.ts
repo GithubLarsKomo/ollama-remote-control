@@ -14,14 +14,19 @@ export function parseCookies(header: string | undefined): Record<string, string>
   return result;
 }
 
+function secureCookiesEnabled(environment: NodeJS.ProcessEnv = process.env): boolean {
+  return environment.ORC_SECURE_COOKIES?.trim().toLowerCase() !== 'false';
+}
+
 function baseCookie(name: string, value: string, maxAgeSeconds: number): string[] {
-  return [
+  const attributes = [
     `${name}=${encodeURIComponent(value)}`,
     'Path=/',
     `Max-Age=${maxAgeSeconds}`,
-    'Secure',
-    'SameSite=Strict',
   ];
+  if (secureCookiesEnabled()) attributes.push('Secure');
+  attributes.push('SameSite=Strict');
+  return attributes;
 }
 
 export function sessionCookie(token: string, maxAgeSeconds: number): string {
