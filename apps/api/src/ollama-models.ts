@@ -14,9 +14,8 @@ import {
   type OllamaHealthTransportMode,
 } from './ollama-health.js';
 import {
-  httpGetViaPinnedSsh,
+  httpGetManyViaPinnedSsh,
   SshHttpError,
-  type OllamaReadPath,
 } from './ssh-http.js';
 
 const MAX_MODELS = 1000;
@@ -197,9 +196,9 @@ function mapSshHttpError(error: SshHttpError): OllamaModelInventoryError {
     return new OllamaModelInventoryError('SSH_HOST_KEY_MISMATCH', 409, 'SSH host-key verification failed.', { cause: error });
   }
   if (error.code === 'HTTP_RESPONSE_TOO_LARGE' || error.code === 'HTTP_RESPONSE_INVALID') {
-    return new OllamaModelInventoryError('OLLAMA_MODEL_DATA_INVALID', 502, 'Ollama model inventory response was invalid.', { cause: error });
+    return new OllamaModelInventoryError('OLLAMA_MODEL_DATA_INVALID', 502, `Ollama model inventory response was invalid (${error.code}).`, { cause: error });
   }
-  return new OllamaModelInventoryError('OLLAMA_API_UNAVAILABLE', 502, 'Ollama API could not be reached through SSH.', { cause: error });
+  return new OllamaModelInventoryError('OLLAMA_API_UNAVAILABLE', 502, `Ollama API could not be reached through SSH (${error.code}).`, { cause: error });
 }
 
 export class OllamaModelInventoryService {
@@ -240,26 +239,6 @@ export class OllamaModelInventoryService {
     };
   }
 
-  private async get(connection: SshPrivateKeyConnection, route: { host: string; port: number }, path: OllamaReadPath): Promise<Buffer> {
-    let response;
-    try {
-      response = await httpGetViaPinnedSsh(
-        connection,
-        route.host,
-        route.port,
-        path,
-        { timeoutMs: 7_500, maxResponseBytes: MAX_RESPONSE_BYTES },
-      );
-    } catch (error) {
-      if (error instanceof SshHttpError) throw mapSshHttpError(error);
-      throw new OllamaModelInventoryError('OLLAMA_API_UNAVAILABLE', 502, 'Ollama model inventory request failed.');
-    }
-    if (response.statusCode < 200 || response.statusCode >= 300) {
-      throw new OllamaModelInventoryError('OLLAMA_API_ERROR', 502, `Ollama API returned HTTP ${response.statusCode}.`);
-    }
-    return response.body;
-  }
-
   async read(targetId: string): Promise<OllamaModelInventoryResult> {
     const target = this.resolve(targetId);
     let inspectResult;
@@ -288,13 +267,33 @@ export class OllamaModelInventoryService {
     const route = selectOllamaApiRoute(inspect);
     if (!route) throw new OllamaModelInventoryError('OLLAMA_API_UNAVAILABLE', 502, 'No safe Ollama API route could be derived from Docker state.');
 
-    const installedBody = await this.get(target.connection, route, '/api/tags');
-    const runningBody = await this.get(target.connection, route, '/api/ps');
+    let responses;
+    try {
+      responses = await httpGetManyViaPinnedSsh(
+        target.connection,
+        route.host,
+        route.port,
+        ['/api/tags', '/api/ps'],
+        { timeoutMs: 7_500, maxResponseBytes: MAX_RESPONSE_BYTES },
+      );
+    } catch (error) {
+      if (error instanceof SshHttpError) throw mapSshHttpError(error);
+      throw new OllamaModelInventoryError('OLLAMA_API_UNAVAILABLE', 502, 'Ollama model inventory request failed.');
+    }
+
+    const [installedResponse, runningResponse] = responses;
+    if (!installedResponse || installedResponse.statusCode < 200 || installedResponse.statusCode >= 300) {
+      throw new OllamaModelInventoryError('OLLAMA_API_ERROR', 502, `Ollama /api/tags returned HTTP ${installedResponse?.statusCode ?? 0}.`);
+    }
+    if (!runningResponse || runningResponse.statusCode < 200 || runningResponse.statusCode >= 300) {
+      throw new OllamaModelInventoryError('OLLAMA_API_ERROR', 502, `Ollama /api/ps returned HTTP ${runningResponse?.statusCode ?? 0}.`);
+    }
+
     return {
       targetId: target.targetId,
       transport: { mode: route.mode },
-      installed: parseInstalledModels(installedBody),
-      running: parseRunningModels(runningBody),
+      installed: parseInstalledModels(installedResponse.body),
+      running: parseRunningModels(runningResponse.body),
     };
   }
 }
