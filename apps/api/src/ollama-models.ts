@@ -14,7 +14,7 @@ import {
   type OllamaHealthTransportMode,
 } from './ollama-health.js';
 import {
-  httpGetManyViaPinnedSsh,
+  httpGetViaPinnedSsh,
   SshHttpError,
 } from './ssh-http.js';
 
@@ -267,26 +267,35 @@ export class OllamaModelInventoryService {
     const route = selectOllamaApiRoute(inspect);
     if (!route) throw new OllamaModelInventoryError('OLLAMA_API_UNAVAILABLE', 502, 'No safe Ollama API route could be derived from Docker state.');
 
-    let responses;
+    let installedResponse;
+    let runningResponse;
     try {
-      responses = await httpGetManyViaPinnedSsh(
-        target.connection,
-        route.host,
-        route.port,
-        ['/api/tags', '/api/ps'],
-        { timeoutMs: 7_500, maxResponseBytes: MAX_RESPONSE_BYTES },
-      );
+      [installedResponse, runningResponse] = await Promise.all([
+        httpGetViaPinnedSsh(
+          target.connection,
+          route.host,
+          route.port,
+          '/api/tags',
+          { timeoutMs: 7_500, maxResponseBytes: MAX_RESPONSE_BYTES },
+        ),
+        httpGetViaPinnedSsh(
+          target.connection,
+          route.host,
+          route.port,
+          '/api/ps',
+          { timeoutMs: 7_500, maxResponseBytes: MAX_RESPONSE_BYTES },
+        ),
+      ]);
     } catch (error) {
       if (error instanceof SshHttpError) throw mapSshHttpError(error);
       throw new OllamaModelInventoryError('OLLAMA_API_UNAVAILABLE', 502, 'Ollama model inventory request failed.');
     }
 
-    const [installedResponse, runningResponse] = responses;
-    if (!installedResponse || installedResponse.statusCode < 200 || installedResponse.statusCode >= 300) {
-      throw new OllamaModelInventoryError('OLLAMA_API_ERROR', 502, `Ollama /api/tags returned HTTP ${installedResponse?.statusCode ?? 0}.`);
+    if (installedResponse.statusCode < 200 || installedResponse.statusCode >= 300) {
+      throw new OllamaModelInventoryError('OLLAMA_API_ERROR', 502, `Ollama /api/tags returned HTTP ${installedResponse.statusCode}.`);
     }
-    if (!runningResponse || runningResponse.statusCode < 200 || runningResponse.statusCode >= 300) {
-      throw new OllamaModelInventoryError('OLLAMA_API_ERROR', 502, `Ollama /api/ps returned HTTP ${runningResponse?.statusCode ?? 0}.`);
+    if (runningResponse.statusCode < 200 || runningResponse.statusCode >= 300) {
+      throw new OllamaModelInventoryError('OLLAMA_API_ERROR', 502, `Ollama /api/ps returned HTTP ${runningResponse.statusCode}.`);
     }
 
     return {
