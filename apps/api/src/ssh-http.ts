@@ -189,7 +189,12 @@ async function httpRequestViaPinnedSsh(
         }
         headers.push('Connection: close', '', '');
         const head = Buffer.from(headers.join('\r\n'), 'utf8');
-        stream.end(request.body ? Buffer.concat([head, request.body]) : head);
+        const payload = request.body ? Buffer.concat([head, request.body]) : head;
+        // Do not half-close the SSH direct-tcpip channel after sending the request.
+        // Some Ollama/Go HTTP paths treat the early client FIN as a cancelled request
+        // while preparing larger responses such as /api/tags. Connection: close asks
+        // the server to close the channel after the complete response instead.
+        stream.write(payload);
       });
     });
     client.once('error', () => {
