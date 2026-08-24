@@ -129,6 +129,7 @@ export interface BuildServerOptions {
   readonly now?: () => Date;
   readonly sessionTtlMs?: number;
   readonly environment?: MasterKeyEnvironment;
+  readonly releaseVersion?: string;
   readonly updateRemoteFactory?: UpdateRemoteFactory;
 }
 
@@ -245,6 +246,7 @@ export function buildServer(options: BuildServerOptions = {}): FastifyInstance {
   applyMigrations(database);
   const now = options.now ?? (() => new Date());
   const sessionTtlMs = options.sessionTtlMs ?? DEFAULT_SESSION_TTL_MS;
+  const releaseVersion = options.releaseVersion ?? '0.0.0-dev';
   const auth = new AuthService(new SqliteAuthRepository(database), now, sessionTtlMs);
   const hostRepository = new SqliteHostOnboardingRepository(database);
   const hostCatalogRepository = new SqliteHostCatalogRepository(database);
@@ -366,7 +368,7 @@ export function buildServer(options: BuildServerOptions = {}): FastifyInstance {
 
   app.get('/api/v1/health', async (): Promise<ApiHealthResponse> => {
     if (!pingDatabase(database)) throw new Error('Database health check failed');
-    return { status: 'ok', service: 'ollama-remote-control-api', version: '0.0.0', database: { status: 'ok', schemaVersion: getSchemaVersion(database) } };
+    return { status: 'ok', service: 'ollama-remote-control-api', version: releaseVersion, database: { status: 'ok', schemaVersion: getSchemaVersion(database) } };
   });
   app.get('/api/v1/setup/status', async () => ({ requiresAdminBootstrap: auth.requiresBootstrap() }));
   app.post<{ Body: CredentialsBody }>('/api/v1/setup/admin', async (request, reply) => {
@@ -680,7 +682,11 @@ export function buildServer(options: BuildServerOptions = {}): FastifyInstance {
 }
 
 async function main(): Promise<void> {
-  const app = buildServer({ databasePath: process.env.ORC_DATABASE_PATH ?? '/data/ollama-remote-control.sqlite', environment: process.env });
+  const app = buildServer({
+    databasePath: process.env.ORC_DATABASE_PATH ?? '/data/ollama-remote-control.sqlite',
+    environment: process.env,
+    releaseVersion: process.env.ORC_RELEASE_VERSION,
+  });
   await app.listen({ host: process.env.HOST ?? '0.0.0.0', port: Number(process.env.PORT ?? 3000) });
 }
 const entrypoint = process.argv[1];

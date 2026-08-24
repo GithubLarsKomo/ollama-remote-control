@@ -17,6 +17,7 @@ export function buildProductionServer(environment: NodeJS.ProcessEnv = process.e
   const app = buildServer({
     databasePath,
     environment,
+    releaseVersion: environment.ORC_RELEASE_VERSION,
   });
   registerAuditFeature(app, {
     databasePath,
