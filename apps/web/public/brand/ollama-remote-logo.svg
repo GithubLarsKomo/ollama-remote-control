@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 420 96" role="img" aria-labelledby="title desc">
+  <title id="title">Ollama Remote Control</title>
+  <desc id="desc">Ollama Remote Control wordmark with remote-control node symbol.</desc>
+  <rect x="4" y="4" width="88" height="88" rx="22" fill="#0b0f0d"/>
+  <circle cx="46" cy="52" r="21" fill="none" stroke="#dfe9e3" stroke-width="7"/>
+  <path d="M61 37 72 26" fill="none" stroke="#74d69a" stroke-width="7" stroke-linecap="round"/>
+  <circle cx="74" cy="24" r="7" fill="#74d69a"/>
+  <circle cx="46" cy="52" r="5.5" fill="#74d69a"/>
+  <text x="116" y="45" fill="#f3f7f4" font-family="Inter,Segoe UI,Arial,sans-serif" font-size="31" font-weight="760" letter-spacing="-1">Ollama Remote</text>
+  <text x="118" y="70" fill="#8fa099" font-family="Inter,Segoe UI,Arial,sans-serif" font-size="15" font-weight="700" letter-spacing="3">CONTROL</text>
+</svg>
