@@ -10,8 +10,12 @@ function fixture() {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'orc-web-assets-'));
   const dist = path.join(root, 'dist');
   const assets = path.join(dist, 'assets');
+  const brand = path.join(dist, 'brand');
   fs.mkdirSync(assets, { recursive: true });
+  fs.mkdirSync(brand, { recursive: true });
   fs.writeFileSync(path.join(dist, 'index.html'), '<!doctype html><title>ORC</title><div id="root"></div>');
+  fs.writeFileSync(path.join(dist, 'manifest.webmanifest'), '{"name":"Ollama Remote Control"}');
+  fs.writeFileSync(path.join(brand, 'ollama-remote-mark.svg'), '<svg xmlns="http://www.w3.org/2000/svg"></svg>');
   fs.writeFileSync(path.join(assets, 'index-abc12345.js'), 'console.log("orc");');
   fs.writeFileSync(path.join(assets, 'index-abc12345.css'), ':root{color-scheme:dark}');
   fs.writeFileSync(path.join(assets, 'runtime.js'), 'console.log("not fingerprinted");');
@@ -58,6 +62,27 @@ test('static web adapter serves index and fingerprinted assets with bounded secu
   }
 });
 
+test('static web adapter serves public brand assets and web manifest', async () => {
+  const { dist } = fixture();
+  const app = Fastify({ logger: false });
+  registerWebAssets(app, dist);
+  try {
+    let response = await app.inject({ method: 'GET', url: '/brand/ollama-remote-mark.svg' });
+    assert.equal(response.statusCode, 200);
+    assert.match(response.headers['content-type'], /^image\/svg\+xml/u);
+    assert.equal(response.headers['cache-control'], 'no-cache');
+
+    response = await app.inject({ method: 'HEAD', url: '/brand/ollama-remote-mark.svg' });
+    assert.equal(response.statusCode, 200);
+
+    response = await app.inject({ method: 'GET', url: '/manifest.webmanifest' });
+    assert.equal(response.statusCode, 200);
+    assert.match(response.headers['content-type'], /^application\/manifest\+json/u);
+  } finally {
+    await app.close();
+  }
+});
+
 test('static web adapter rejects traversal, symlinks and missing assets without exposing filesystem content', async () => {
   const { dist } = fixture();
   const app = Fastify({ logger: false });
@@ -69,6 +94,8 @@ test('static web adapter rejects traversal, symlinks and missing assets without 
       '/assets/missing.js',
       '/assets/subdir%2F..%2Findex-abc12345.js',
       '/assets/%2e%2e/outside.txt',
+      '/brand/%2e%2e%2Foutside.txt',
+      '/brand/missing.svg',
     ]) {
       const response = await app.inject({ method: 'GET', url });
       assert.equal(response.statusCode, 404, url);
