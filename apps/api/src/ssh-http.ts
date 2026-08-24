@@ -146,6 +146,7 @@ async function httpRequestViaPinnedSsh(
     let channel: ClientChannel | null = null;
     let activeRequest: http.ClientRequest | null = null;
     let settled = false;
+    let responseStarted = false;
     let hostKeyObserved = false;
     let hostKeyMismatch = false;
 
@@ -169,7 +170,9 @@ async function httpRequestViaPinnedSsh(
           return;
         }
         channel = stream;
-        stream.once('error', () => finish(new SshHttpError('SSH_FORWARD_FAILED', 'SSH forwarded TCP stream failed.')));
+        stream.once('error', () => {
+          if (!responseStarted) finish(new SshHttpError('SSH_FORWARD_FAILED', 'SSH forwarded TCP stream failed.'));
+        });
 
         const hostHeader = destinationHost.includes(':') ? `[${destinationHost}]:${destinationPort}` : `${destinationHost}:${destinationPort}`;
         const headers: http.OutgoingHttpHeaders = {
@@ -192,6 +195,7 @@ async function httpRequestViaPinnedSsh(
           agent: false,
           createConnection: () => stream,
         }, (response) => {
+          responseStarted = true;
           const chunks: Buffer[] = [];
           let total = 0;
           response.on('data', (chunk: Buffer) => {
@@ -220,7 +224,9 @@ async function httpRequestViaPinnedSsh(
           });
         });
         activeRequest = nodeRequest;
-        nodeRequest.once('error', () => finish(new SshHttpError('SSH_FORWARD_FAILED', 'SSH-tunneled HTTP request failed.')));
+        nodeRequest.once('error', () => {
+          if (!responseStarted) finish(new SshHttpError('SSH_FORWARD_FAILED', 'SSH-tunneled HTTP request failed.'));
+        });
         nodeRequest.end(request.body);
       });
     });
