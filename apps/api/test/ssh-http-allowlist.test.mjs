@@ -73,11 +73,12 @@ test('SSH HTTP response parser accepts a realistic large chunked Ollama tags res
   assert.deepEqual(response.body, payload);
 });
 
-test('SSH HTTP adapter lets the HTTP response own the forwarded-channel lifecycle', () => {
+test('SSH HTTP adapter uses one pinned remote exec request instead of direct-tcpip forwarding', () => {
   const source = fs.readFileSync(new URL('../src/ssh-http.ts', import.meta.url), 'utf8');
-  assert.match(source, /createConnection:\s*\(\)\s*=>\s*stream/u);
-  assert.match(source, /responseStarted\s*=\s*true/u);
-  assert.match(source, /if\s*\(!responseStarted\)\s*finish/u);
-  assert.doesNotMatch(source, /stream\.end\(request\.body/u);
-  assert.match(source, /Connection:\s*'close'/u);
+  assert.match(source, /execPrivateKey\(connection, argv/u);
+  assert.match(source, /'curl'/u);
+  assert.match(source, /'--noproxy', '\*'/u);
+  assert.match(source, /stdin:\s*request\.body\?\.toString\('utf8'\)/u);
+  assert.doesNotMatch(source, /forwardOut\(/u);
+  assert.doesNotMatch(source, /createConnection:/u);
 });
