@@ -1,7 +1,8 @@
-import { createHash } from 'node:crypto';
-import type { ClientChannel } from 'ssh2';
-import { Client } from 'ssh2';
-import type { SshPrivateKeyConnection } from '@orc/ssh';
+import {
+  execPrivateKey,
+  SshTransportError,
+  type SshPrivateKeyConnection,
+} from '@orc/ssh';
 
 export type SshHttpErrorCode =
   | 'SSH_HOST_KEY_MISMATCH'
@@ -30,19 +31,17 @@ export interface SshHttpOptions {
 }
 
 export type OllamaReadPath = '/api/version' | '/api/tags' | '/api/ps';
+
 const OLLAMA_READ_PATHS = new Set<string>(['/api/version', '/api/tags', '/api/ps']);
 const MAX_OLLAMA_MODEL_NAME = 512;
 const MAX_HTTP_RESPONSE_BYTES = 4 * 1024 * 1024;
+const CURL_STATUS_MARKER = '\n__ORC_HTTP_STATUS__:';
 
 interface FixedHttpRequest {
   readonly method: 'GET' | 'POST';
   readonly path: string;
   readonly body?: Buffer;
   readonly contentType?: string;
-}
-
-function fingerprintSha256(key: Buffer): string {
-  return `SHA256:${createHash('sha256').update(key).digest('base64').replace(/=+$/u, '')}`;
 }
 
 function decodeChunked(body: Buffer, maxBytes: number): Buffer {
@@ -107,10 +106,10 @@ export function parseHttpResponse(raw: Buffer, maxBodyBytes: number): SshHttpRes
 
 function validateDestination(destinationHost: string, destinationPort: number, timeoutMs: number, maxResponseBytes: number): void {
   if (!Number.isInteger(destinationPort) || destinationPort < 1 || destinationPort > 65535) {
-    throw new SshHttpError('SSH_FORWARD_FAILED', 'SSH forward destination port is invalid.');
+    throw new SshHttpError('SSH_FORWARD_FAILED', 'SSH destination port is invalid.');
   }
   if (!destinationHost || destinationHost.length > 255 || /[\u0000-\u0020\u007f]/u.test(destinationHost)) {
-    throw new SshHttpError('SSH_FORWARD_FAILED', 'SSH forward destination host is invalid.');
+    throw new SshHttpError('SSH_FORWARD_FAILED', 'SSH destination host is invalid.');
   }
   if (!Number.isInteger(timeoutMs) || timeoutMs < 100 || timeoutMs > 60_000) {
     throw new SshHttpError('HTTP_TIMEOUT', 'HTTP timeout is invalid.');
@@ -120,7 +119,12 @@ function validateDestination(destinationHost: string, destinationPort: number, t
   }
 }
 
-async function httpRequestViaPinnedSsh(
+function curlUrl(destinationHost: string, destinationPort: number, path: string): string {
+  const host = destinationHost.includes(':') ? `[${destinationHost}]` : destinationHost;
+  return `http://${host}:${destinationPort}${path}`;
+}
+
+async function httpRequestViaPinnedExec(
   connection: SshPrivateKeyConnection,
   destinationHost: string,
   destinationPort: number,
@@ -131,90 +135,78 @@ async function httpRequestViaPinnedSsh(
   const maxResponseBytes = options.maxResponseBytes ?? 64 * 1024;
   validateDestination(destinationHost, destinationPort, timeoutMs, maxResponseBytes);
 
-  return new Promise<SshHttpResponse>((resolve, reject) => {
-    const client = new Client();
-    let channel: ClientChannel | null = null;
-    let settled = false;
-    let hostKeyObserved = false;
-    let hostKeyMismatch = false;
-    const received: Buffer[] = [];
-    let receivedBytes = 0;
+  const argv = [
+    'curl',
+    '--noproxy', '*',
+    '--silent',
+    '--show-error',
+    '--max-time', String(Math.max(1, Math.ceil(timeoutMs / 1000))),
+    '--output', '-',
+    '--write-out', `${CURL_STATUS_MARKER}%{http_code}`,
+  ];
+  if (request.method === 'POST') {
+    argv.push(
+      '--request', 'POST',
+      '--header', `Content-Type: ${request.contentType ?? 'application/json'}`,
+      '--data-binary', '@-',
+    );
+  }
+  argv.push(curlUrl(destinationHost, destinationPort, request.path));
 
-    const finish = (error?: Error, response?: SshHttpResponse) => {
-      if (settled) return;
-      settled = true;
-      clearTimeout(timer);
-      try { channel?.destroy(); } catch { /* best effort */ }
-      try { client.end(); } catch { /* best effort */ }
-      if (error) reject(error);
-      else resolve(response!);
-    };
+  let result;
+  try {
+    result = await execPrivateKey(connection, argv, {
+      timeoutMs: timeoutMs + 1_000,
+      maxOutputBytes: maxResponseBytes + 1024,
+      stdin: request.body?.toString('utf8'),
+      maxInputBytes: maxResponseBytes,
+    });
+  } catch (error) {
+    if (error instanceof SshTransportError && error.code === 'SSH_HOST_KEY_MISMATCH') {
+      throw new SshHttpError('SSH_HOST_KEY_MISMATCH', 'SSH host-key verification failed.', { cause: error });
+    }
+    if (error instanceof SshTransportError && (error.code === 'SSH_CONNECT_FAILED' || error.code === 'AUTH_FAILED')) {
+      throw new SshHttpError('SSH_CONNECT_FAILED', 'SSH HTTP exec could not connect.', { cause: error });
+    }
+    throw new SshHttpError('SSH_FORWARD_FAILED', 'SSH HTTP exec failed.', { cause: error as Error });
+  }
 
-    const timer = setTimeout(() => finish(new SshHttpError('HTTP_TIMEOUT', 'SSH-tunneled HTTP request timed out.')), timeoutMs);
+  if (result.exitCode !== 0) {
+    if (result.exitCode === 28) throw new SshHttpError('HTTP_TIMEOUT', 'Ollama HTTP request timed out.');
+    throw new SshHttpError('SSH_FORWARD_FAILED', 'SSH HTTP exec returned a non-zero exit code.');
+  }
 
-    client.on('ready', () => {
-      client.forwardOut('127.0.0.1', 0, destinationHost, destinationPort, (error, stream) => {
-        if (error) {
-          finish(new SshHttpError('SSH_FORWARD_FAILED', 'SSH TCP forwarding failed.'));
-          return;
-        }
-        channel = stream;
-        stream.on('data', (chunk: Buffer) => {
-          if (settled) return;
-          receivedBytes += chunk.length;
-          if (receivedBytes > maxResponseBytes + 16 * 1024) {
-            finish(new SshHttpError('HTTP_RESPONSE_TOO_LARGE', 'HTTP response exceeded the configured size limit.'));
-            return;
-          }
-          received.push(Buffer.from(chunk));
-        });
-        stream.once('error', () => finish(new SshHttpError('SSH_FORWARD_FAILED', 'SSH forwarded TCP stream failed.')));
-        stream.once('close', () => {
-          if (settled) return;
-          try {
-            finish(undefined, parseHttpResponse(Buffer.concat(received, receivedBytes), maxResponseBytes));
-          } catch (parseError) {
-            finish(parseError instanceof Error ? parseError : new SshHttpError('HTTP_RESPONSE_INVALID', 'HTTP response parsing failed.'));
-          }
-        });
-        const hostHeader = destinationHost.includes(':') ? `[${destinationHost}]:${destinationPort}` : `${destinationHost}:${destinationPort}`;
-        const headers = [
-          `${request.method} ${request.path} HTTP/1.1`,
-          `Host: ${hostHeader}`,
-          'Accept: application/json',
-        ];
-        if (request.body) {
-          headers.push(`Content-Type: ${request.contentType ?? 'application/json'}`);
-          headers.push(`Content-Length: ${request.body.length}`);
-        }
-        headers.push('Connection: close', '', '');
-        const head = Buffer.from(headers.join('\r\n'), 'utf8');
-        stream.end(request.body ? Buffer.concat([head, request.body]) : head);
-      });
-    });
-    client.once('error', () => {
-      if (hostKeyObserved && hostKeyMismatch) {
-        finish(new SshHttpError('SSH_HOST_KEY_MISMATCH', 'SSH host-key verification failed.'));
-        return;
-      }
-      finish(new SshHttpError('SSH_CONNECT_FAILED', 'SSH connection failed.'));
-    });
-    client.once('end', () => {
-      if (!settled && !channel) finish(new SshHttpError('SSH_CONNECT_FAILED', 'SSH connection ended before TCP forwarding started.'));
-    });
-    client.connect({
-      host: connection.hostname,
-      port: connection.port,
-      username: connection.username,
-      privateKey: connection.privateKey,
-      readyTimeout: Math.min(timeoutMs, 10_000),
-      hostVerifier: (key: Buffer) => {
-        hostKeyObserved = true;
-        hostKeyMismatch = fingerprintSha256(key) !== connection.expectedFingerprint;
-        return !hostKeyMismatch;
-      },
-    });
-  });
+  const markerIndex = result.stdout.lastIndexOf(CURL_STATUS_MARKER);
+  if (markerIndex < 0) throw new SshHttpError('HTTP_RESPONSE_INVALID', 'SSH HTTP exec returned no status marker.');
+  const statusText = result.stdout.slice(markerIndex + CURL_STATUS_MARKER.length).trim();
+  if (!/^\d{3}$/u.test(statusText)) throw new SshHttpError('HTTP_RESPONSE_INVALID', 'SSH HTTP exec returned an invalid status.');
+
+  const body = Buffer.from(result.stdout.slice(0, markerIndex), 'utf8');
+  if (body.length > maxResponseBytes) throw new SshHttpError('HTTP_RESPONSE_TOO_LARGE', 'HTTP response exceeded the configured size limit.');
+  return { statusCode: Number(statusText), headers: {}, body };
+}
+
+export async function httpGetManyViaPinnedSsh(
+  connection: SshPrivateKeyConnection,
+  destinationHost: string,
+  destinationPort: number,
+  requestPaths: readonly OllamaReadPath[],
+  options: SshHttpOptions = {},
+): Promise<readonly SshHttpResponse[]> {
+  if (requestPaths.length === 0 || requestPaths.some((requestPath) => !OLLAMA_READ_PATHS.has(requestPath))) {
+    throw new SshHttpError('HTTP_REQUEST_INVALID', 'Ollama HTTP request path is not allowed.');
+  }
+  const responses: SshHttpResponse[] = [];
+  for (const requestPath of requestPaths) {
+    responses.push(await httpRequestViaPinnedExec(
+      connection,
+      destinationHost,
+      destinationPort,
+      { method: 'GET', path: requestPath },
+      options,
+    ));
+  }
+  return responses;
 }
 
 export async function httpGetViaPinnedSsh(
@@ -227,7 +219,7 @@ export async function httpGetViaPinnedSsh(
   if (!OLLAMA_READ_PATHS.has(requestPath)) {
     throw new SshHttpError('HTTP_REQUEST_INVALID', 'Ollama HTTP request path is not allowed.');
   }
-  return httpRequestViaPinnedSsh(
+  return httpRequestViaPinnedExec(
     connection,
     destinationHost,
     destinationPort,
@@ -252,7 +244,7 @@ export async function httpPostOllamaShowViaPinnedSsh(
     throw new SshHttpError('HTTP_REQUEST_INVALID', 'Ollama model name is invalid.');
   }
   const body = Buffer.from(JSON.stringify({ model: modelName, verbose: false }), 'utf8');
-  return httpRequestViaPinnedSsh(
+  return httpRequestViaPinnedExec(
     connection,
     destinationHost,
     destinationPort,
